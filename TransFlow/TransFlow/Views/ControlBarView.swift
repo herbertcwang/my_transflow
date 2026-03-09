@@ -176,6 +176,9 @@ struct ControlBarView: View {
             // Translation controls
             translationControls
 
+            // Speaker diarization toggle
+            diarizationToggle
+
             // Floating preview button
             popUpPreviewButton
         }
@@ -399,6 +402,47 @@ struct ControlBarView: View {
         Locale.current.localizedString(
             forIdentifier: viewModel.translationService.targetLanguage.minimalIdentifier
         ) ?? viewModel.translationService.targetLanguage.minimalIdentifier
+    }
+
+    // MARK: - Diarization Toggle
+
+    private var diarizationToggle: some View {
+        Button {
+            settings.liveEnableDiarization.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "person.2.wave.2")
+                    .font(.system(size: 12, weight: .medium))
+
+                if viewModel.isDiarizationEnabled && viewModel.activeSpeakerCount > 0 {
+                    Text("\(viewModel.activeSpeakerCount)")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                }
+            }
+            .foregroundStyle(settings.liveEnableDiarization ? .white : .primary)
+            .frame(height: 26)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(settings.liveEnableDiarization
+                          ? AnyShapeStyle(Color.orange)
+                          : AnyShapeStyle(.quaternary.opacity(0.5)))
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!DiarizationModelManager.shared.modelStatus.isReady)
+        .opacity(DiarizationModelManager.shared.modelStatus.isReady ? 1.0 : 0.4)
+        .help(diarizationHelpText)
+    }
+
+    private var diarizationHelpText: Text {
+        if !DiarizationModelManager.shared.modelStatus.isReady {
+            Text("control.diarization_model_required")
+        } else if settings.liveEnableDiarization {
+            Text("control.disable_diarization")
+        } else {
+            Text("control.enable_diarization")
+        }
     }
 
     // MARK: - Pop Up Preview Button

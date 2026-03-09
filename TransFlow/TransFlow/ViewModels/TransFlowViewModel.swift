@@ -41,6 +41,12 @@ final class TransFlowViewModel {
     /// JSONL persistence store for the current session.
     let jsonlStore = JSONLStore()
 
+    /// Whether real-time speaker diarization is active this session.
+    var isDiarizationEnabled: Bool = false
+
+    /// Active speaker count from the current diarization session.
+    var activeSpeakerCount: Int = 0
+
     // MARK: - Private
 
     private let audioCaptureService = AudioCaptureService()
@@ -50,6 +56,7 @@ final class TransFlowViewModel {
     private var listeningTask: Task<Void, Never>?
     private var audioLevelTask: Task<Void, Never>?
     private var recordingTask: Task<Void, Never>?
+    private var diarizationTask: Task<Void, Never>?
     private var lifecycleObserver: (any NSObjectProtocol)?
 
     /// Current recording file name (set while recording is active).
@@ -57,6 +64,15 @@ final class TransFlowViewModel {
 
     /// When the current partial utterance started (for flushing on stop).
     private var partialStartTimestamp: Date?
+
+    /// Session start time for converting absolute timestamps to relative offsets.
+    private var sessionStartTime: Date?
+
+    /// Realtime diarization service.
+    private var realtimeDiarizationService: RealtimeDiarizationService?
+
+    /// Diarization segments received so far, used for backfilling sentences.
+    private var diarizationSegments: [RealtimeDiarizationService.SpeakerSegment] = []
 
     // MARK: - Initialization
 
@@ -201,8 +217,9 @@ final class TransFlowViewModel {
                 }
 
                 self.stopAudioCapture = stop
+                self.sessionStartTime = Date()
 
-                // Fork audio stream: engine, UI level, and recording
+                // Fork audio stream: engine, UI level, recording, and diarization
                 let (engineStream, engineContinuation) = AsyncStream<AudioChunk>.makeStream(
                     bufferingPolicy: .bufferingNewest(256)
                 )
@@ -210,6 +227,9 @@ final class TransFlowViewModel {
                     bufferingPolicy: .bufferingNewest(64)
                 )
                 let (recordingStream, recordingContinuation) = AsyncStream<AudioChunk>.makeStream(
+                    bufferingPolicy: .bufferingNewest(256)
+                )
+                let (diarizationStream, diarizationContinuation) = AsyncStream<AudioChunk>.makeStream(
                     bufferingPolicy: .bufferingNewest(256)
                 )
 
@@ -236,22 +256,64 @@ final class TransFlowViewModel {
                     }
                 }
 
-                // Fork task — fan out audio to all three consumers
+                // Diarization — start if enabled and models ready
+                let enableDiarization = AppSettings.shared.liveEnableDiarization
+                    && DiarizationModelManager.shared.modelStatus.isReady
+                self.isDiarizationEnabled = enableDiarization
+
+                if enableDiarization {
+                    do {
+                        let diarizationModels = try await DiarizationModelManager.shared.loadModels()
+                        let diarizationService = try RealtimeDiarizationService()
+                        diarizationService.initialize(models: diarizationModels)
+                        self.realtimeDiarizationService = diarizationService
+                        self.diarizationSegments = []
+                        self.activeSpeakerCount = 0
+
+                        try diarizationService.start { [weak self] segments in
+                            Task { @MainActor [weak self] in
+                                self?.handleDiarizationSegments(segments)
+                            }
+                        }
+
+                        diarizationTask = Task {
+                            for await chunk in diarizationStream {
+                                diarizationService.feedAudio(chunk.samples)
+                            }
+                        }
+                    } catch {
+                        ErrorLogger.shared.log(
+                            "RealtimeDiarizationService failed: \(error.localizedDescription)",
+                            source: "RealtimeDiarization"
+                        )
+                        self.isDiarizationEnabled = false
+                    }
+                }
+
+                if !isDiarizationEnabled {
+                    diarizationTask = Task.detached {
+                        for await _ in diarizationStream {}
+                    }
+                }
+
+                // Fork task — fan out audio to all four consumers
                 let forkTask = Task.detached {
                     for await chunk in audioStream {
                         engineContinuation.yield(chunk)
                         levelContinuation.yield(chunk)
                         recordingContinuation.yield(chunk)
+                        diarizationContinuation.yield(chunk)
                     }
                     engineContinuation.finish()
                     levelContinuation.finish()
                     recordingContinuation.finish()
+                    diarizationContinuation.finish()
                 }
 
                 listeningState = .active
                 errorMessage = nil
                 ErrorLogger.shared.log(
-                    "startListening: engine started, now active",
+                    "startListening: engine started, diarization=\(enableDiarization), now active",
                     source: "Transcription"
                 )
 
@@ -269,6 +331,9 @@ final class TransFlowViewModel {
                         if let translation = await translationService.translateSentence(sentence.text) {
                             sentence.translation = translation
                         }
+                        if isDiarizationEnabled {
+                            sentence.speakerId = assignSpeaker(for: sentence)
+                        }
                         sentences.append(sentence)
                         jsonlStore.appendEntry(sentence: sentence)
                         currentPartialText = ""
@@ -280,7 +345,6 @@ final class TransFlowViewModel {
                         ErrorLogger.shared.log(message, source: "Transcription")
                     }
                 }
-
 
                 forkTask.cancel()
 
@@ -326,6 +390,16 @@ final class TransFlowViewModel {
         recordingTask = nil
         currentRecordingFileName = nil
 
+        // Stop diarization
+        realtimeDiarizationService?.stop()
+        realtimeDiarizationService = nil
+        diarizationTask?.cancel()
+        diarizationTask = nil
+        diarizationSegments = []
+        isDiarizationEnabled = false
+        activeSpeakerCount = 0
+        sessionStartTime = nil
+
         stopAudioCapture?()
         stopAudioCapture = nil
         audioLevelTask?.cancel()
@@ -370,5 +444,113 @@ final class TransFlowViewModel {
 
     func exportSRT() async {
         await SRTExporter.exportToFile(sentences: sentences)
+    }
+
+    // MARK: - Diarization
+
+    /// Handle incoming diarization segments from the streaming pipeline.
+    private func handleDiarizationSegments(_ segments: [RealtimeDiarizationService.SpeakerSegment]) {
+        diarizationSegments.append(contentsOf: segments)
+        activeSpeakerCount = realtimeDiarizationService?.speakerCount ?? 0
+
+        backfillSpeakerIds()
+    }
+
+    /// Assign a speaker to a sentence by matching its time range against diarization segments.
+    private func assignSpeaker(for sentence: TranscriptionSentence) -> String? {
+        guard let sessionStart = sessionStartTime else { return nil }
+        let sentStart = sentence.startTimestamp.timeIntervalSince(sessionStart)
+        let sentEnd = sentence.timestamp.timeIntervalSince(sessionStart)
+
+        var bestSpeaker: String?
+        var bestOverlap: Double = 0
+
+        for seg in diarizationSegments {
+            let overlapStart = max(sentStart, Double(seg.startTime))
+            let overlapEnd = min(sentEnd, Double(seg.endTime))
+            let overlap = max(0, overlapEnd - overlapStart)
+            if overlap > bestOverlap {
+                bestOverlap = overlap
+                bestSpeaker = seg.speakerId
+            }
+        }
+
+        return bestSpeaker
+    }
+
+    /// Backfill speakerId for sentences that were emitted before diarization results arrived.
+    private func backfillSpeakerIds() {
+        guard let sessionStart = sessionStartTime else { return }
+        var changed = false
+
+        for i in sentences.indices where sentences[i].speakerId == nil {
+            let sentStart = sentences[i].startTimestamp.timeIntervalSince(sessionStart)
+            let sentEnd = sentences[i].timestamp.timeIntervalSince(sessionStart)
+
+            var bestSpeaker: String?
+            var bestOverlap: Double = 0
+
+            for seg in diarizationSegments {
+                let overlapStart = max(sentStart, Double(seg.startTime))
+                let overlapEnd = min(sentEnd, Double(seg.endTime))
+                let overlap = max(0, overlapEnd - overlapStart)
+                if overlap > bestOverlap {
+                    bestOverlap = overlap
+                    bestSpeaker = seg.speakerId
+                }
+            }
+
+            if let speaker = bestSpeaker {
+                sentences[i].speakerId = speaker
+                changed = true
+            }
+        }
+
+        if changed {
+            rewriteJSONLWithCurrentSentences()
+        }
+    }
+
+    /// Rewrite the JSONL file with updated speaker IDs after backfill.
+    private func rewriteJSONLWithCurrentSentences() {
+        guard let fileURL = jsonlStore.currentFileURL else { return }
+        let allLines = jsonlStore.readAllLines(from: fileURL)
+
+        var contentIndex = 0
+        var updatedLines: [JSONLLine] = []
+
+        for line in allLines {
+            switch line {
+            case .content(let entry):
+                if contentIndex < sentences.count {
+                    let sentence = sentences[contentIndex]
+                    let updated = JSONLContentEntry(
+                        startTime: entry.startTime,
+                        endTime: entry.endTime,
+                        originalText: entry.originalText,
+                        translatedText: entry.translatedText,
+                        speakerId: sentence.speakerId
+                    )
+                    updatedLines.append(.content(updated))
+                } else {
+                    updatedLines.append(line)
+                }
+                contentIndex += 1
+            default:
+                updatedLines.append(line)
+            }
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = []
+        var output = ""
+        for (i, line) in updatedLines.enumerated() {
+            if let data = try? encoder.encode(line),
+               let str = String(data: data, encoding: .utf8) {
+                if i > 0 { output += "\n" }
+                output += str
+            }
+        }
+        try? output.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 }

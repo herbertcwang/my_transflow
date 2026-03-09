@@ -70,7 +70,7 @@ struct JSONLMetadata: Codable {
     init(createTime: Date = Date(), appVersion: String? = nil) {
         self.createTime = ISO8601DateFormatter().string(from: createTime)
         self.appVersion = appVersion
-            ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.4.1")
+            ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.4.2")
     }
 }
 
@@ -83,6 +83,7 @@ struct JSONLContentEntry: Codable {
     let endTime: String
     let originalText: String
     let translatedText: String?
+    let speakerId: String?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -90,6 +91,7 @@ struct JSONLContentEntry: Codable {
         case endTime = "end_time"
         case originalText = "original_text"
         case translatedText = "translated_text"
+        case speakerId = "speaker_id"
     }
 
     /// Convenience initializer from a `TranscriptionSentence`.
@@ -99,13 +101,15 @@ struct JSONLContentEntry: Codable {
         self.endTime = formatter.string(from: sentence.timestamp)
         self.originalText = sentence.text
         self.translatedText = sentence.translation
+        self.speakerId = sentence.speakerId
     }
 
-    init(startTime: String, endTime: String, originalText: String, translatedText: String?) {
+    init(startTime: String, endTime: String, originalText: String, translatedText: String?, speakerId: String? = nil) {
         self.startTime = startTime
         self.endTime = endTime
         self.originalText = originalText
         self.translatedText = translatedText
+        self.speakerId = speakerId
     }
 }
 

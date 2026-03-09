@@ -177,10 +177,11 @@ struct FloatingPreviewView: View {
         for sentence in viewModel.sentences.suffix(maxFinalizedSentenceCount) {
             let sourceText = sentence.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !sourceText.isEmpty {
+                let prefix = sentence.speakerId.map { SpeakerDisplayName.displayName(for: $0) + ": " } ?? ""
                 lines.append(
                     CaptionLine(
                         id: "sentence-source-\(sentence.id.uuidString)",
-                        text: sourceText,
+                        text: prefix + sourceText,
                         kind: .source
                     )
                 )

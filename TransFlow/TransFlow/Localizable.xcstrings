@@ -118,6 +118,40 @@
         }
       }
     },
+    "control.diarization_model_required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speaker diarization model not installed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说话人识别模型未安装"
+          }
+        }
+      }
+    },
+    "control.disable_diarization" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disable speaker diarization"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭说话人识别"
+          }
+        }
+      }
+    },
     "control.disable_translation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -148,6 +182,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在下载模型…"
+          }
+        }
+      }
+    },
+    "control.enable_diarization" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable speaker diarization"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启说话人识别"
           }
         }
       }
@@ -580,6 +631,23 @@
         }
       }
     },
+    "history.badge.audio" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音频"
+          }
+        }
+      }
+    },
     "history.badge.video" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -916,6 +984,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "实时转写"
+          }
+        }
+      }
+    },
+    "history.filter.audio" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音频转写"
           }
         }
       }

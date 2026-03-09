@@ -2,13 +2,31 @@ import Foundation
 
 /// A completed transcription sentence with timestamp and optional translation.
 struct TranscriptionSentence: Identifiable, Sendable {
-    let id = UUID()
+    let id: UUID
     /// When the utterance started (first partial text appeared)
     let startTimestamp: Date
     /// When the sentence was finalized
     let timestamp: Date
     let text: String
     var translation: String?
+    /// Assigned speaker (e.g. "speaker_0"), nil if diarization disabled or pending
+    var speakerId: String?
+
+    init(
+        id: UUID = UUID(),
+        startTimestamp: Date,
+        timestamp: Date,
+        text: String,
+        translation: String? = nil,
+        speakerId: String? = nil
+    ) {
+        self.id = id
+        self.startTimestamp = startTimestamp
+        self.timestamp = timestamp
+        self.text = text
+        self.translation = translation
+        self.speakerId = speakerId
+    }
 }
 
 /// Events emitted by the SpeechEngine during transcription.

@@ -106,6 +106,7 @@ final class AppSettings {
         }
 
         self.diarizationSensitivity = UserDefaults.standard.object(forKey: "diarizationSensitivity") as? Double ?? 0.8
+        self.liveEnableDiarization = UserDefaults.standard.object(forKey: "liveEnableDiarization") as? Bool ?? false
 
         self.videoSourceLanguage = UserDefaults.standard.string(forKey: "videoSourceLanguage") ?? "en"
         self.videoEnableTranslation = UserDefaults.standard.bool(forKey: "videoEnableTranslation")
@@ -136,6 +137,13 @@ final class AppSettings {
     var diarizationSensitivity: Double {
         didSet {
             UserDefaults.standard.set(diarizationSensitivity, forKey: "diarizationSensitivity")
+        }
+    }
+
+    /// Whether real-time diarization is enabled for live transcription.
+    var liveEnableDiarization: Bool {
+        didSet {
+            UserDefaults.standard.set(liveEnableDiarization, forKey: "liveEnableDiarization")
         }
     }
 

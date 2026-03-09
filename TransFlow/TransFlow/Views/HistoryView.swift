@@ -16,6 +16,7 @@ struct HistoryView: View {
         switch filter {
         case .all: return allItems
         case .live: return allItems.filter { $0.type == .live }
+        case .media: return allItems.filter { $0.type == .audio }
         case .video: return allItems.filter { $0.type == .video }
         }
     }
@@ -42,7 +43,7 @@ struct HistoryView: View {
                             if let session = selected.liveSession {
                                 SessionDetailView(session: session, store: liveStore)
                             }
-                        case .video:
+                        case .video, .audio:
                             if let session = selected.videoSession {
                                 VideoSessionDetailView(session: session, store: videoStore)
                             }
@@ -338,7 +339,7 @@ struct SessionListView: View {
                 onRefresh()
                 selectedItemID = "live_\(newName)"
             }
-        case .video:
+        case .video, .audio:
             if videoStore.renameSession(from: item.name, to: newName) {
                 renamingItemID = nil
                 onRefresh()
@@ -352,7 +353,7 @@ struct SessionListView: View {
         switch item.type {
         case .live:
             liveStore.deleteSession(name: item.name)
-        case .video:
+        case .video, .audio:
             videoStore.deleteSession(name: item.name)
         }
         itemToDelete = nil
@@ -368,7 +369,7 @@ struct SessionListView: View {
                 switch item.type {
                 case .live:
                     liveStore.deleteSession(name: item.name)
-                case .video:
+                case .video, .audio:
                     videoStore.deleteSession(name: item.name)
                 }
             }
@@ -425,15 +426,15 @@ struct HistoryRowView: View {
                     .foregroundStyle(.orange)
                 }
 
-                if item.type == .video, let session = item.videoSession,
+                if (item.type == .video || item.type == .audio), let session = item.videoSession,
                    let duration = session.durationSeconds {
                     HStack(spacing: 3) {
-                        Image(systemName: "video")
+                        Image(systemName: item.type == .video ? "video" : "music.note")
                             .font(.system(size: 9, weight: .medium))
                         Text(formatDurationSeconds(duration))
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                     }
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(item.type == .video ? .blue : .green)
                 }
 
                 HStack(spacing: 3) {
@@ -449,8 +450,20 @@ struct HistoryRowView: View {
     }
 
     private var typeBadge: some View {
-        let color: Color = item.type == .live ? .orange : .blue
-        return Text(item.type == .live ? "history.badge.live" : "history.badge.video")
+        let color: Color
+        let labelKey: LocalizedStringKey
+        switch item.type {
+        case .live:
+            color = .orange
+            labelKey = "history.badge.live"
+        case .audio:
+            color = .green
+            labelKey = "history.badge.audio"
+        case .video:
+            color = .blue
+            labelKey = "history.badge.video"
+        }
+        return Text(labelKey)
             .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(color)
             .padding(.horizontal, 5)
@@ -1122,42 +1135,7 @@ struct VideoSessionDetailView: View {
     // MARK: - Audio Player Header
 
     private func audioPlayerHeader(url: URL) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "music.note")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.blue)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.videoFile ?? session.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                if let duration = session.durationSeconds {
-                    Text(TranscriptionExporter.formatTimestamp(duration))
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            Spacer()
-
-            Button {
-                if playerModel.player?.rate == 0 {
-                    playerModel.player?.play()
-                } else {
-                    playerModel.player?.pause()
-                }
-            } label: {
-                Image(systemName: playerModel.player?.rate == 0 ? "play.fill" : "pause.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(.quaternary.opacity(0.4)))
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.background)
+        MediaPlayerBarView(playerModel: playerModel, title: session.videoFile ?? session.name)
     }
 
     // MARK: - Rich Preview
@@ -1485,7 +1463,7 @@ struct EntryRowView: View {
                 .frame(height: 0.5)
                 .padding(.vertical, 10)
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(displayTime)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(hasAudioOffset ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
@@ -1503,6 +1481,10 @@ struct EntryRowView: View {
                     .onTapGesture {
                         onTimestampTap?()
                     }
+
+                if let speakerId = entry.speakerId {
+                    entrySpeakerBadge(speakerId)
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(entry.originalText)
@@ -1533,6 +1515,20 @@ struct EntryRowView: View {
                     .strokeBorder(isActive ? Color.accentColor.opacity(0.3) : Color.clear, lineWidth: 1)
             )
         }
+    }
+
+    private func entrySpeakerBadge(_ speakerId: String) -> some View {
+        let colorHex = SpeakerColor.color(for: speakerId)
+        let displayName = SpeakerDisplayName.displayName(for: speakerId)
+        return Text(displayName)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Color(hex: colorHex))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color(hex: colorHex).opacity(0.12))
+            )
     }
 
     private var displayTime: String {

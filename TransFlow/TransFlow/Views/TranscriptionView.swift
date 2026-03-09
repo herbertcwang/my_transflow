@@ -61,7 +61,7 @@ struct TranscriptionView: View {
     }
 }
 
-/// A single completed sentence row with timestamp and optional translation.
+/// A single completed sentence row with timestamp, optional speaker, and optional translation.
 struct SentenceRow: View {
     let sentence: TranscriptionSentence
     let showTranslation: Bool
@@ -74,7 +74,7 @@ struct SentenceRow: View {
                 .frame(height: 0.5)
                 .padding(.vertical, 10)
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 // Timestamp badge
                 Text(sentence.timestamp, format: .dateTime.hour().minute().second())
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
@@ -85,6 +85,11 @@ struct SentenceRow: View {
                         RoundedRectangle(cornerRadius: 4, style: .continuous)
                             .fill(.quaternary.opacity(0.3))
                     )
+
+                // Speaker badge
+                if let speakerId = sentence.speakerId {
+                    speakerBadge(speakerId)
+                }
 
                 // Text content
                 VStack(alignment: .leading, spacing: 4) {
@@ -104,5 +109,20 @@ struct SentenceRow: View {
                 }
             }
         }
+    }
+
+    private func speakerBadge(_ speakerId: String) -> some View {
+        let colorHex = SpeakerColor.color(for: speakerId)
+        let displayName = SpeakerDisplayName.displayName(for: speakerId)
+
+        return Text(displayName)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Color(hex: colorHex))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color(hex: colorHex).opacity(0.12))
+            )
     }
 }
