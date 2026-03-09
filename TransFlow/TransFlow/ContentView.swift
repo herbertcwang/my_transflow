@@ -118,7 +118,7 @@ struct BottomPanelView: View {
 
     private var shouldShowPreview: Bool {
         viewModel.listeningState == .active
-            || viewModel.listeningState == .starting
+            || (viewModel.listeningState == .starting && !viewModel.modelManager.currentModelStatus.isDownloading)
             || !viewModel.currentPartialText.isEmpty
     }
 
@@ -135,7 +135,8 @@ struct BottomPanelView: View {
     }
 
     private var isListening: Bool {
-        viewModel.listeningState == .active || viewModel.listeningState == .starting
+        viewModel.listeningState == .active
+            || (viewModel.listeningState == .starting && !viewModel.modelManager.currentModelStatus.isDownloading)
     }
 
     private var partialTranslationText: String? {

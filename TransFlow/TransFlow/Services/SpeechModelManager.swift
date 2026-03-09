@@ -72,6 +72,10 @@ final class SpeechModelManager {
     private var progressObservation: (any NSObjectProtocol)?
     private var lifecycleObserver: (any NSObjectProtocol)?
 
+    /// In-flight download tasks keyed by locale identifier, used to deduplicate
+    /// concurrent downloads and let `ensureModelReady` await an active download.
+    private var downloadTasks: [String: Task<Bool, Never>] = [:]
+
     private init() {
         setupLifecycleObserver()
     }
@@ -283,10 +287,13 @@ final class SpeechModelManager {
 
         case .downloading:
             ErrorLogger.shared.log(
-                "ensureModelReady(\(locale.identifier)): already downloading",
+                "ensureModelReady(\(locale.identifier)): already downloading — awaiting completion",
                 source: "SpeechModel"
             )
-            return false
+            if let task = downloadTasks[locale.identifier] {
+                return await task.value
+            }
+            return await pollUntilReady(for: locale)
 
         case .unsupported:
             ErrorLogger.shared.log(
@@ -297,13 +304,18 @@ final class SpeechModelManager {
             return false
 
         case .checking:
-            return false
+            return await pollUntilReady(for: locale)
         }
     }
 
     /// Download and install the speech model for a specific locale.
-    /// Returns `true` on success.
+    /// Returns `true` on success. Reentrant-safe: concurrent calls for the same
+    /// locale share a single download task.
     func downloadModel(for locale: Locale) async -> Bool {
+        if let existingTask = downloadTasks[locale.identifier] {
+            return await existingTask.value
+        }
+
         guard let supportedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
             ErrorLogger.shared.log(
                 "downloadModel(\(locale.identifier)): no supported locale equivalent — aborting",
@@ -332,45 +344,78 @@ final class SpeechModelManager {
         currentModelStatus = .downloading(progress: 0)
         localeStatuses[locale.identifier] = .downloading(progress: 0)
 
-        do {
-            await ensureReservationSlotAvailable(excluding: supportedLocale)
-            try await AssetInventory.reserve(locale: supportedLocale)
+        let task = Task<Bool, Never> {
+            do {
+                await ensureReservationSlotAvailable(excluding: supportedLocale)
+                try await AssetInventory.reserve(locale: supportedLocale)
 
-            if let installRequest = try await AssetInventory.assetInstallationRequest(
-                supporting: [transcriber]
-            ) {
-                let progress = installRequest.progress
-                startObservingProgress(progress, locale: locale)
-                try await installRequest.downloadAndInstall()
+                if let installRequest = try await AssetInventory.assetInstallationRequest(
+                    supporting: [transcriber]
+                ) {
+                    let progress = installRequest.progress
+                    startObservingProgress(progress, locale: locale)
+                    try await installRequest.downloadAndInstall()
+                    stopObservingProgress()
+                }
+
+                let finalStatus = await checkStatus(for: locale)
+                currentModelStatus = finalStatus
+                localeStatuses[locale.identifier] = finalStatus
+                isDownloading = false
+                downloadingLocale = nil
+
+                ErrorLogger.shared.log(
+                    "downloadModel(\(locale.identifier)): completed — final status: \(finalStatus.displayKey)",
+                    source: "SpeechModel"
+                )
+
+                return finalStatus.isReady
+
+            } catch {
+                ErrorLogger.shared.log(
+                    "downloadModel(\(locale.identifier)): failed — \(error.localizedDescription)",
+                    source: "SpeechModel"
+                )
+                let failedStatus = SpeechModelStatus.failed(message: error.localizedDescription)
+                currentModelStatus = failedStatus
+                localeStatuses[locale.identifier] = failedStatus
+                isDownloading = false
+                downloadingLocale = nil
                 stopObservingProgress()
+                return false
             }
-
-            let finalStatus = await checkStatus(for: locale)
-            currentModelStatus = finalStatus
-            localeStatuses[locale.identifier] = finalStatus
-            isDownloading = false
-            downloadingLocale = nil
-
-            ErrorLogger.shared.log(
-                "downloadModel(\(locale.identifier)): completed — final status: \(finalStatus.displayKey)",
-                source: "SpeechModel"
-            )
-
-            return finalStatus.isReady
-
-        } catch {
-            ErrorLogger.shared.log(
-                "downloadModel(\(locale.identifier)): failed — \(error.localizedDescription)",
-                source: "SpeechModel"
-            )
-            let failedStatus = SpeechModelStatus.failed(message: error.localizedDescription)
-            currentModelStatus = failedStatus
-            localeStatuses[locale.identifier] = failedStatus
-            isDownloading = false
-            downloadingLocale = nil
-            stopObservingProgress()
-            return false
         }
+
+        downloadTasks[locale.identifier] = task
+        let result = await task.value
+        downloadTasks[locale.identifier] = nil
+        return result
+    }
+
+    // MARK: - Poll
+
+    /// Poll `checkStatus` until the model reaches a terminal state or timeout.
+    /// Used when the system (not our app) is downloading a model and we have no
+    /// task to await directly.
+    private func pollUntilReady(for locale: Locale, timeout: TimeInterval = 300) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return false }
+
+            let status = await checkStatus(for: locale)
+            currentModelStatus = status
+
+            switch status {
+            case .installed:
+                return true
+            case .downloading, .checking:
+                continue
+            case .notDownloaded, .failed, .unsupported:
+                return false
+            }
+        }
+        return false
     }
 
     // MARK: - Progress Observation
