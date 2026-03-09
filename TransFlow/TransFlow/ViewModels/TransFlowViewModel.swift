@@ -21,7 +21,7 @@ final class TransFlowViewModel {
     var audioSource: AudioSourceType = .microphone
     /// Selected transcription language
     var selectedLanguage: Locale = Locale(identifier: "en-US")
-    /// Available transcription languages
+    /// Available transcription languages (installed/ready only)
     var availableLanguages: [Locale] = []
     /// Available apps for audio capture
     var availableApps: [AppAudioTarget] = []
@@ -50,6 +50,7 @@ final class TransFlowViewModel {
     private var listeningTask: Task<Void, Never>?
     private var audioLevelTask: Task<Void, Never>?
     private var recordingTask: Task<Void, Never>?
+    private var lifecycleObserver: (any NSObjectProtocol)?
 
     /// Current recording file name (set while recording is active).
     private var currentRecordingFileName: String?
@@ -63,26 +64,57 @@ final class TransFlowViewModel {
         Task {
             await initialize()
         }
+        setupLifecycleObserver()
     }
 
     private func initialize() async {
         jsonlStore.createSession()
         micPermissionGranted = await AudioCaptureService.requestPermission()
         translationService.updateSourceLanguage(from: selectedLanguage)
-        await loadSupportedLanguages()
+        await refreshInstalledLanguages()
         await refreshAvailableApps()
         await modelManager.checkCurrentStatus(for: selectedLanguage)
-        if !modelManager.currentModelStatus.isReady {
-            await modelManager.ensureModelReady(for: selectedLanguage)
+    }
+
+    private func setupLifecycleObserver() {
+        lifecycleObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                ErrorLogger.shared.log(
+                    "App became active — listeningState=\(self.listeningState), selectedLanguage=\(self.selectedLanguage.identifier)",
+                    source: "Transcription"
+                )
+                guard self.listeningState == .idle else { return }
+                await self.refreshInstalledLanguages()
+                await self.modelManager.checkCurrentStatus(for: self.selectedLanguage)
+            }
         }
     }
 
     // MARK: - Language
 
     func loadSupportedLanguages() async {
-        let locales = await SpeechTranscriber.supportedLocales
-        availableLanguages = locales.map { Locale(identifier: $0.language.minimalIdentifier) }
-            .sorted { $0.identifier < $1.identifier }
+        await refreshInstalledLanguages()
+    }
+
+    func refreshInstalledLanguages() async {
+        await modelManager.refreshAllStatuses()
+        let supportedLanguages = modelManager.supportedLocales.sorted { $0.identifier < $1.identifier }
+        availableLanguages = supportedLanguages.filter { locale in
+            (modelManager.localeStatuses[locale.identifier] ?? .checking).isReady
+        }
+
+        guard !availableLanguages.isEmpty else { return }
+
+        let selectedIdentifier = selectedLanguage.identifier
+        if !availableLanguages.contains(where: { $0.identifier == selectedIdentifier }) {
+            selectedLanguage = availableLanguages[0]
+            translationService.updateSourceLanguage(from: selectedLanguage)
+        }
     }
 
     func switchLanguage(to locale: Locale) {
@@ -96,9 +128,6 @@ final class TransFlowViewModel {
 
         Task {
             await modelManager.checkCurrentStatus(for: locale)
-            if !modelManager.currentModelStatus.isReady {
-                await modelManager.ensureModelReady(for: locale)
-            }
         }
 
         if wasListening {
@@ -116,12 +145,24 @@ final class TransFlowViewModel {
 
     func startListening() {
         guard listeningState == .idle else { return }
+        guard !availableLanguages.isEmpty else {
+            showModelNotReadyAlert = true
+            return
+        }
         listeningState = .starting
+        ErrorLogger.shared.log(
+            "startListening: language=\(selectedLanguage.identifier), source=\(audioSource)",
+            source: "Transcription"
+        )
 
         listeningTask = Task {
             do {
                 let modelReady = await modelManager.ensureModelReady(for: selectedLanguage)
                 guard modelReady else {
+                    ErrorLogger.shared.log(
+                        "startListening: model not ready for \(selectedLanguage.identifier) — showing alert",
+                        source: "Transcription"
+                    )
                     showModelNotReadyAlert = true
                     listeningState = .idle
                     return
@@ -207,6 +248,10 @@ final class TransFlowViewModel {
 
                 listeningState = .active
                 errorMessage = nil
+                ErrorLogger.shared.log(
+                    "startListening: engine started, now active",
+                    source: "Transcription"
+                )
 
                 let events = engine.processStream(engineStream)
                 for await event in events {
@@ -249,6 +294,10 @@ final class TransFlowViewModel {
 
     func stopListening() {
         guard listeningState == .active || listeningState == .starting else { return }
+        ErrorLogger.shared.log(
+            "stopListening: sentences=\(sentences.count), partialText=\(currentPartialText.isEmpty ? "(empty)" : "present")",
+            source: "Transcription"
+        )
         listeningState = .stopping
 
         // Flush remaining partial text as a final sentence
