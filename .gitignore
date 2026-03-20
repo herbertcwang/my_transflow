@@ -41,9 +41,8 @@ Icon?
 .vscode
 .idea/
 
-# Build output & DMG
+# Build output
 build/
-*.dmg
 
 # Misc
 *.swp

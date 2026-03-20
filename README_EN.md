@@ -15,7 +15,7 @@
   **English** | [中文](README.md)
 
   <a href="https://github.com/Cyronlee/TransFlow/releases">
-    <img src="https://img.shields.io/badge/Download-DMG%20Installer-blue?style=for-the-badge&logo=apple" alt="Download">
+    <img src="https://img.shields.io/badge/Download-PKG%20Installer-blue?style=for-the-badge&logo=apple" alt="Download">
   </a>
 </div>
 
@@ -62,9 +62,9 @@
 
 ### Download
 
-1. Go to the [Releases page](https://github.com/Cyronlee/TransFlow/releases) to download the latest DMG installer
-2. Open the DMG file and drag TransFlow into your Applications folder
-3. On first launch, if you see a security prompt, go to System Settings → Privacy & Security to allow the app
+1. Go to the [Releases page](https://github.com/Cyronlee/TransFlow/releases) to download the latest PKG installer
+2. Double-click the `.pkg` file and follow the Installer steps
+3. Launch TransFlow from Applications after installation completes
 
 ### Build from Source
 

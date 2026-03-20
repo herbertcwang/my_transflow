@@ -1,18 +1,18 @@
 ---
 name: github-release
-description: Publish a new GitHub Release for TransFlow with version bump, release notes, DMG build, and gh CLI. Use when the user asks to release a version, publish a release, create a GitHub release, or mentions "发布 vX.Y.Z".
+description: Publish a new GitHub Release for TransFlow with version bump, release notes, notarized PKG build, and gh CLI. Use when the user asks to release a version, publish a release, create a GitHub release, or mentions "发布 vX.Y.Z".
 ---
 
 # GitHub Release
 
-Publish a new TransFlow version to GitHub Releases with DMG attachment.
+Publish a new TransFlow version to GitHub Releases with a notarized PKG attachment.
 
 ## Prerequisites
 
 - `gh` CLI installed and authenticated (`gh auth status`)
-- `create-dmg` installed (`brew install create-dmg`)
 - Xcode Command Line Tools
 - Working directory clean (no uncommitted changes unrelated to release)
+- `./scripts/build-pkg.sh` available and runnable on the local machine
 
 ## Workflow
 
@@ -24,8 +24,8 @@ Task Progress:
 - [ ] Step 2: Update version numbers
 - [ ] Step 3: Generate release notes
 - [ ] Step 4: Commit, tag, push
-- [ ] Step 5: Build DMG locally
-- [ ] Step 6: Create GitHub Release with DMG
+- [ ] Step 5: Build notarized PKG locally
+- [ ] Step 6: Create GitHub Release with PKG
 - [ ] Step 7: Verify release
 ```
 
@@ -92,18 +92,16 @@ git tag -a vX.Y.Z -m "TransFlow vX.Y.Z"
 git push origin main --tags
 ```
 
-### Step 5: Build DMG locally
+### Step 5: Build PKG locally
 
 ```bash
-./scripts/build-dmg.sh --clean --sign
+./scripts/build-pkg.sh --clean
 ```
 
-- `--sign` auto-detects signing identity and auto-loads project entitlements (microphone, etc.)
-- The build disables Xcode signing; the script handles signing separately for consistency
-- Signing identity: `5JNN9A6Z6X`, Team ID: `8RQVLSP2SC`
-- Set `block_until_ms` to 300000 (5 min) — build + DMG takes time
-- Output: `build/TransFlow-X.Y.Z.dmg`
-- Verify the DMG file exists and is non-empty before proceeding
+- The script must sign the app with `Developer ID Application`, sign the installer with `Developer ID Installer`, notarize with `TransFlowNotary`, and staple the ticket
+- Set `block_until_ms` to 300000 (5 min) — build + notarization can take time
+- Output: `build/TransFlow-X.Y.Z.pkg`
+- Verify the PKG file exists, is non-empty, and passes `spctl -a -t install -vv`
 
 ### Step 6: Create GitHub Release
 
@@ -111,7 +109,7 @@ git push origin main --tags
 gh release create vX.Y.Z \
   --title "TransFlow vX.Y.Z" \
   --notes-file release-notes/vX.Y.Z.md \
-  ./build/TransFlow-X.Y.Z.dmg
+  ./build/TransFlow-X.Y.Z.pkg
 ```
 
 ### Step 7: Verify release
@@ -123,7 +121,7 @@ gh release view vX.Y.Z
 Confirm:
 - Title and tag are correct
 - `draft: false`, `prerelease: false`
-- DMG asset is listed with non-zero size
+- PKG asset is listed with non-zero size
 - Release notes render correctly
 
 Report the release URL to the user.
@@ -134,6 +132,6 @@ Report the release URL to the user.
 |-------|--------|
 | `gh auth` fails | Ask user to run `gh auth login` |
 | `xcodebuild` fails | Check build errors, fix, retry |
-| `create-dmg` exit code ≠ 0 and ≠ 2 | Check script output for details |
+| `build-pkg.sh` fails | Check signing identities, `TransFlowNotary`, notarization output, then retry |
 | `gh release create` fails | Check if tag already has a release; use `gh release delete vX.Y.Z` then retry |
-| DMG file missing after build | Check `build/` directory; re-run build script |
+| PKG file missing after build | Check `build/` directory; re-run build script |
