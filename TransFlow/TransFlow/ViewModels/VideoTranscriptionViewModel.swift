@@ -51,6 +51,13 @@ final class VideoTranscriptionViewModel {
     // MARK: - Initialization
 
     init() {
+        translationService.isEnabled = enableTranslation
+        translationService.targetLanguage = targetLanguage
+        if enableTranslation {
+            translationService.updateSourceLanguage(from: selectedLocale)
+            translationService.updateConfiguration()
+        }
+
         Task {
             await refreshAvailableLanguages()
         }

@@ -269,45 +269,154 @@ struct SettingsView: View {
     // MARK: - Version Row
 
     private var versionRow: some View {
-        Group {
+        VStack(spacing: 0) {
             switch updateChecker.status {
-            case .updateAvailable(let version, let url):
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    HStack {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("settings.version")
-                                    .font(.system(size: 13, weight: .regular))
-                                    .foregroundStyle(.primary)
-                                Text("settings.update_available \(version)")
-                                    .font(.system(size: 11, weight: .regular))
-                                    .foregroundStyle(.orange)
-                            }
-                        } icon: {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 14, weight: .medium))
+            case .updateAvailable(let version, _):
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("settings.version")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(.primary)
+                            Text("settings.update_available \(version)")
+                                .font(.system(size: 11, weight: .regular))
                                 .foregroundStyle(.orange)
-                                .frame(width: 24)
                         }
-
-                        Spacer()
-
-                        HStack(spacing: 4) {
-                            Text(appVersionString)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.tertiary)
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                        }
+                    } icon: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.orange)
+                            .frame(width: 24)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .contentShape(Rectangle())
+
+                    Spacer()
+
+                    HStack(spacing: 8) {
+                        Text(appVersionString)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+
+                        Button {
+                            updateChecker.downloadUpdate()
+                        } label: {
+                            Text("settings.update_download")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(Color.accentColor)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+
+            case .downloading(let progress):
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("settings.version")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(.primary)
+                            Text("settings.update_downloading \(Int(progress * 100))")
+                                .font(.system(size: 11, weight: .regular))
+                                .foregroundStyle(.blue)
+                        }
+                    } icon: {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.blue)
+                            .frame(width: 24)
+                    }
+
+                    Spacer()
+
+                    HStack(spacing: 8) {
+                        ProgressView(value: progress, total: 1.0)
+                            .progressViewStyle(.linear)
+                            .frame(width: 80)
+                            .tint(.blue)
+
+                        Button {
+                            updateChecker.cancelDownload()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+
+            case .readyToInstall(let version, _):
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("settings.version")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(.primary)
+                            Text("settings.update_ready \(version)")
+                                .font(.system(size: 11, weight: .regular))
+                                .foregroundStyle(.green)
+                        }
+                    } icon: {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.green)
+                            .frame(width: 24)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        updateChecker.installUpdate()
+                    } label: {
+                        Text("settings.update_install")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(Color.green)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+
+            case .installing:
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("settings.version")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(.primary)
+                            Text("settings.update_installing")
+                                .font(.system(size: 11, weight: .regular))
+                                .foregroundStyle(.blue)
+                        }
+                    } icon: {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 24)
+                    }
+
+                    Spacer()
+
+                    Text(appVersionString)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
 
             case .upToDate:
                 HStack {
@@ -360,11 +469,17 @@ struct SettingsView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
 
-            case .failed:
+            case .failed(let message):
                 HStack {
                     Label {
-                        Text("settings.version")
-                            .font(.system(size: 13, weight: .regular))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("settings.version")
+                                .font(.system(size: 13, weight: .regular))
+                            Text(message)
+                                .font(.system(size: 11, weight: .regular))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     } icon: {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 14, weight: .medium))
@@ -407,7 +522,37 @@ struct SettingsView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
+
+            Divider().padding(.leading, 46)
+
+            checkForUpdatesRow
         }
+    }
+
+    private var checkForUpdatesRow: some View {
+        Button {
+            updateChecker.checkForUpdates()
+        } label: {
+            HStack {
+                Label {
+                    Text("settings.check_for_updates")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.primary)
+                } icon: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(updateChecker.status == .checking)
     }
 
     // MARK: - Speech Models Content
@@ -853,7 +998,7 @@ struct SettingsView: View {
     // MARK: - Helpers
 
     private var appVersionString: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.5.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.0"
     }
 
     // MARK: - Open Logs Row

@@ -1,0 +1,8 @@
+#!/bin/bash
+# Kill running TransFlow before installation so the new version can replace it cleanly.
+APP_NAME="TransFlow"
+if pgrep -x "${APP_NAME}" >/dev/null 2>&1; then
+    killall "${APP_NAME}" 2>/dev/null || true
+    sleep 1
+fi
+exit 0

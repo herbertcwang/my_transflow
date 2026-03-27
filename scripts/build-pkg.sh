@@ -301,10 +301,22 @@ sign_app "${APP_PATH}"
 
 info "生成 PKG 安装包..."
 rm -f "${PKG_FINAL}"
+
+PKG_SCRIPTS_DIR="${PROJECT_DIR}/scripts/pkg-scripts"
+
+COMPONENT_PKG="${PKG_DIR}/${APP_NAME}-component.pkg"
+pkgbuild \
+    --component "${APP_PATH}" \
+    --install-location "${INSTALL_LOCATION}" \
+    --scripts "${PKG_SCRIPTS_DIR}" \
+    "${COMPONENT_PKG}"
+
 productbuild \
-    --component "${APP_PATH}" "${INSTALL_LOCATION}" \
+    --package "${COMPONENT_PKG}" \
     --sign "${INSTALLER_SIGN_IDENTITY}" \
     "${PKG_FINAL}"
+
+rm -f "${COMPONENT_PKG}"
 
 pkgutil --check-signature "${PKG_FINAL}"
 

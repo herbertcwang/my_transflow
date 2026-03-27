@@ -81,7 +81,7 @@ struct VideoJSONLMetadata: Codable {
         self.diarizationEnabled = diarizationEnabled
         self.createTime = ISO8601DateFormatter().string(from: createTime)
         self.appVersion = appVersion
-            ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.5.0")
+            ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.0")
     }
 }
 
