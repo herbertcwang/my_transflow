@@ -87,6 +87,7 @@ final class TransFlowViewModel {
         jsonlStore.createSession()
         micPermissionGranted = await AudioCaptureService.requestPermission()
         translationService.updateSourceLanguage(from: selectedLanguage)
+        DiarizationModelManager.shared.checkStatus()
         await refreshInstalledLanguages()
         await refreshAvailableApps()
         await modelManager.checkCurrentStatus(for: selectedLanguage)
@@ -105,6 +106,7 @@ final class TransFlowViewModel {
                     source: "Transcription"
                 )
                 guard self.listeningState == .idle else { return }
+                DiarizationModelManager.shared.checkStatus()
                 await self.refreshInstalledLanguages()
                 await self.modelManager.checkCurrentStatus(for: self.selectedLanguage)
             }
@@ -262,6 +264,7 @@ final class TransFlowViewModel {
                 }
 
                 // Diarization — start if enabled and models ready
+                DiarizationModelManager.shared.checkStatus()
                 let enableDiarization = AppSettings.shared.liveEnableDiarization
                     && DiarizationModelManager.shared.modelStatus.isReady
                 self.isDiarizationEnabled = enableDiarization
@@ -348,6 +351,7 @@ final class TransFlowViewModel {
                     case .error(let message):
                         errorMessage = message
                         ErrorLogger.shared.log(message, source: "Transcription")
+                        await SpeechRuntimeRecovery.refreshSpeechModelState(for: self.selectedLanguage)
                     }
                 }
 

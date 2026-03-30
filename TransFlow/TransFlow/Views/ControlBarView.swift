@@ -7,6 +7,7 @@ struct ControlBarView: View {
     @Bindable var viewModel: TransFlowViewModel
     @Bindable var floatingPreviewManager: FloatingPreviewPanelManager
     @Bindable var settings: AppSettings
+    @State private var diarizationModelManager = DiarizationModelManager.shared
 
     var body: some View {
         HStack(spacing: 0) {
@@ -446,13 +447,16 @@ struct ControlBarView: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(!DiarizationModelManager.shared.modelStatus.isReady)
-        .opacity(DiarizationModelManager.shared.modelStatus.isReady ? 1.0 : 0.4)
+        .disabled(!diarizationModelManager.modelStatus.isReady)
+        .opacity(diarizationModelManager.modelStatus.isReady ? 1.0 : 0.4)
         .help(diarizationHelpText)
+        .task(id: "diarization-status") {
+            diarizationModelManager.checkStatus()
+        }
     }
 
     private var diarizationHelpText: Text {
-        if !DiarizationModelManager.shared.modelStatus.isReady {
+        if !diarizationModelManager.modelStatus.isReady {
             Text("control.diarization_model_required")
         } else if settings.liveEnableDiarization {
             Text("control.disable_diarization")

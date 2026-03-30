@@ -1,5 +1,6 @@
 import Foundation
 import FluidAudio
+import AppKit
 
 /// Manages FluidAudio diarization model assets: checking status, downloading, and tracking progress.
 @Observable
@@ -12,9 +13,12 @@ final class DiarizationModelManager {
     var isDownloading: Bool = false
 
     private static let chinaHFMirror = "https://hf-mirror.com"
+    private var lifecycleObserver: (any NSObjectProtocol)?
 
     private init() {
         applyRegionBasedEndpoint()
+        checkStatus()
+        setupLifecycleObserver()
     }
 
     // MARK: - HF Endpoint (auto-detect region)
@@ -54,6 +58,19 @@ final class DiarizationModelManager {
             modelStatus = .installed
         } else {
             modelStatus = .notDownloaded
+        }
+    }
+
+    private func setupLifecycleObserver() {
+        lifecycleObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.checkStatus()
+            }
         }
     }
 

@@ -49,6 +49,12 @@ enum SpeechModelStatus: Equatable {
 @Observable
 @MainActor
 final class SpeechModelManager {
+    private struct StatusSnapshot {
+        let supportedLocale: Locale
+        let installedLocaleIDs: Set<String>
+        let assetStatus: AssetInventory.Status
+    }
+
     static let shared = SpeechModelManager()
 
     /// Status of the currently selected transcription language model.
@@ -181,7 +187,7 @@ final class SpeechModelManager {
 
     /// Check the model status for a specific locale.
     func checkStatus(for locale: Locale) async -> SpeechModelStatus {
-        guard let supportedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
+        guard let snapshot = await statusSnapshot(for: locale) else {
             let status = SpeechModelStatus.unsupported
             localeStatuses[locale.identifier] = status
             ErrorLogger.shared.log(
@@ -191,28 +197,7 @@ final class SpeechModelManager {
             return status
         }
 
-        let transcriber = SpeechTranscriber(
-            locale: supportedLocale,
-            transcriptionOptions: [],
-            reportingOptions: [],
-            attributeOptions: []
-        )
-
-        let assetStatus = await AssetInventory.status(forModules: [transcriber])
-
-        let modelStatus: SpeechModelStatus
-        switch assetStatus {
-        case .installed:
-            modelStatus = .installed
-        case .downloading:
-            modelStatus = .downloading(progress: downloadProgress)
-        case .supported:
-            modelStatus = .notDownloaded
-        case .unsupported:
-            modelStatus = .unsupported
-        @unknown default:
-            modelStatus = .notDownloaded
-        }
+        let modelStatus = modelStatus(for: snapshot, requestedLocale: locale)
 
         let prev = localeStatuses[locale.identifier]
         localeStatuses[locale.identifier] = modelStatus
@@ -237,9 +222,10 @@ final class SpeechModelManager {
     func refreshAllStatuses() async {
         let locales = await SpeechTranscriber.supportedLocales
         supportedLocales = locales.sorted { $0.identifier < $1.identifier }
+        let installedLocaleIDs = Set((await SpeechTranscriber.installedLocales).map(\.identifier))
 
         for locale in supportedLocales {
-            let status = await checkStatus(for: locale)
+            let status = await checkStatus(for: locale, installedLocaleIDs: installedLocaleIDs)
             localeStatuses[locale.identifier] = status
         }
     }
@@ -461,5 +447,100 @@ final class SpeechModelManager {
     /// The maximum number of locales the app can reserve.
     var maximumReservedLocales: Int {
         AssetInventory.maximumReservedLocales
+    }
+
+    private func checkStatus(
+        for locale: Locale,
+        installedLocaleIDs: Set<String>
+    ) async -> SpeechModelStatus {
+        guard let supportedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
+            let status = SpeechModelStatus.unsupported
+            localeStatuses[locale.identifier] = status
+            ErrorLogger.shared.log(
+                "checkStatus(\(locale.identifier)): unsupported (no equivalent locale)",
+                source: "SpeechModel"
+            )
+            return status
+        }
+
+        let transcriber = SpeechTranscriber(
+            locale: supportedLocale,
+            transcriptionOptions: [],
+            reportingOptions: [],
+            attributeOptions: []
+        )
+        let assetStatus = await AssetInventory.status(forModules: [transcriber])
+        let snapshot = StatusSnapshot(
+            supportedLocale: supportedLocale,
+            installedLocaleIDs: installedLocaleIDs,
+            assetStatus: assetStatus
+        )
+        let modelStatus = modelStatus(for: snapshot, requestedLocale: locale)
+
+        let prev = localeStatuses[locale.identifier]
+        localeStatuses[locale.identifier] = modelStatus
+
+        if let prev, prev != modelStatus {
+            ErrorLogger.shared.log(
+                "checkStatus(\(locale.identifier)): \(prev.displayKey) → \(modelStatus.displayKey)",
+                source: "SpeechModel"
+            )
+        }
+
+        return modelStatus
+    }
+
+    private func statusSnapshot(for locale: Locale) async -> StatusSnapshot? {
+        guard let supportedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
+            return nil
+        }
+
+        let transcriber = SpeechTranscriber(
+            locale: supportedLocale,
+            transcriptionOptions: [],
+            reportingOptions: [],
+            attributeOptions: []
+        )
+        let installedLocaleIDs = Set((await SpeechTranscriber.installedLocales).map(\.identifier))
+        let assetStatus = await AssetInventory.status(forModules: [transcriber])
+
+        return StatusSnapshot(
+            supportedLocale: supportedLocale,
+            installedLocaleIDs: installedLocaleIDs,
+            assetStatus: assetStatus
+        )
+    }
+
+    private func modelStatus(
+        for snapshot: StatusSnapshot,
+        requestedLocale: Locale
+    ) -> SpeechModelStatus {
+        let supportedIdentifier = snapshot.supportedLocale.identifier
+        let installed = snapshot.installedLocaleIDs.contains(supportedIdentifier)
+
+        let modelStatus: SpeechModelStatus
+        if installed {
+            modelStatus = .installed
+        } else {
+            switch snapshot.assetStatus {
+            case .downloading:
+                modelStatus = .downloading(progress: downloadProgress)
+            case .unsupported:
+                modelStatus = .unsupported
+            case .installed, .supported:
+                modelStatus = .notDownloaded
+            @unknown default:
+                modelStatus = .notDownloaded
+            }
+        }
+
+        if !installed, snapshot.assetStatus == .installed {
+            ErrorLogger.shared.log(
+                "checkStatus(\(requestedLocale.identifier)): asset inventory reports installed but installedLocales is missing \(supportedIdentifier)",
+                source: "SpeechModel"
+            )
+        }
+
+        return modelStatus
     }
 }

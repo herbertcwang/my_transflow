@@ -53,6 +53,7 @@ final class VideoTranscriptionViewModel {
     init() {
         translationService.isEnabled = enableTranslation
         translationService.targetLanguage = targetLanguage
+        diarizationModelManager.checkStatus()
         if enableTranslation {
             translationService.updateSourceLanguage(from: selectedLocale)
             translationService.updateConfiguration()
@@ -314,6 +315,7 @@ final class VideoTranscriptionViewModel {
                 break
             case .error(let message):
                 ErrorLogger.shared.log("Transcription error: \(message)", source: "VideoTranscription")
+                await SpeechRuntimeRecovery.refreshSpeechModelState(for: locale)
             }
         }
 
