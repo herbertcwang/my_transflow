@@ -149,6 +149,9 @@ final class TransFlowViewModel {
             if !modelManager.currentModelStatus.isReady {
                 await modelManager.ensureModelReady(for: locale)
             }
+            if translationService.isEnabled {
+                await translationService.refreshAndAutoSelect()
+            }
             if wasListening {
                 startListening()
             }

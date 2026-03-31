@@ -45,6 +45,9 @@ struct TransFlowApp: App {
                 viewModel.translationService.isEnabled.toggle()
                 if viewModel.translationService.isEnabled {
                     viewModel.translationService.updateSourceLanguage(from: viewModel.selectedLanguage)
+                    Task {
+                        await viewModel.translationService.refreshAndAutoSelect(force: true)
+                    }
                 } else {
                     viewModel.translationService.updateConfiguration()
                 }

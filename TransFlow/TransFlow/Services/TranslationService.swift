@@ -22,6 +22,72 @@ final class TranslationService {
     /// Currently translated partial text
     var currentPartialTranslation: String = ""
 
+    /// Cached availability statuses for translation language pairs (target language → status).
+    /// Key is target language's minimalIdentifier.
+    var languageStatuses: [String: LanguageAvailability.Status] = [:]
+
+    /// All supported target languages for the translation UI.
+    static let supportedTargetLanguages: [Locale.Language] = [
+        Locale.Language(identifier: "zh-Hans"),
+        Locale.Language(identifier: "zh-Hant"),
+        Locale.Language(identifier: "en"),
+        Locale.Language(identifier: "ja"),
+        Locale.Language(identifier: "ko"),
+        Locale.Language(identifier: "fr"),
+        Locale.Language(identifier: "de"),
+        Locale.Language(identifier: "es"),
+        Locale.Language(identifier: "pt"),
+        Locale.Language(identifier: "ru"),
+        Locale.Language(identifier: "ar"),
+        Locale.Language(identifier: "it"),
+    ]
+
+    /// Refresh the availability status for all target languages against the current source language.
+    func refreshLanguageStatuses() async {
+        guard let source = sourceLanguage else { return }
+        let availability = LanguageAvailability()
+        var newStatuses: [String: LanguageAvailability.Status] = [:]
+        for lang in Self.supportedTargetLanguages {
+            if lang.languageCode == source.languageCode {
+                newStatuses[lang.minimalIdentifier] = .installed
+                continue
+            }
+            let status = await availability.status(from: source, to: lang)
+            newStatuses[lang.minimalIdentifier] = status
+        }
+        languageStatuses = newStatuses
+    }
+
+    /// Target languages that are installed and differ from the current source language.
+    var availableTargetLanguages: [Locale.Language] {
+        guard let source = sourceLanguage else { return [] }
+        return Self.supportedTargetLanguages.filter { lang in
+            lang.languageCode != source.languageCode
+            && languageStatuses[lang.minimalIdentifier] == .installed
+        }
+    }
+
+    /// Refresh statuses, auto-select the first available target (or keep current if still valid),
+    /// and update the translation configuration. Call on toggle-on and source language change.
+    func refreshAndAutoSelect(force: Bool = false) async {
+        await refreshLanguageStatuses()
+        let available = availableTargetLanguages
+        if available.isEmpty || !available.contains(where: { $0.minimalIdentifier == targetLanguage.minimalIdentifier }) {
+            if let first = available.first {
+                targetLanguage = first
+            }
+        }
+        if isEnabled {
+            updateConfiguration(force: force)
+        }
+    }
+
+    /// Check availability for a single language pair. Returns the status.
+    func checkAvailability(from source: Locale.Language, to target: Locale.Language) async -> LanguageAvailability.Status {
+        let availability = LanguageAvailability()
+        return await availability.status(from: source, to: target)
+    }
+
     /// Maps a transcription Locale (e.g. "en-US", "zh-Hans-CN") to a Translation Locale.Language.
     /// The Translation framework uses BCP 47 language tags without region (e.g. "en", "zh-Hans").
     static func translationLanguage(from transcriptionLocale: Locale) -> Locale.Language {
@@ -60,7 +126,8 @@ final class TranslationService {
     }
 
     /// Update the configuration to trigger a new translation session.
-    func updateConfiguration() {
+    /// Set `force` to true to always recreate the configuration (e.g. when re-enabling the toggle).
+    func updateConfiguration(force: Bool = false) {
         guard isEnabled else {
             cancelAllTranslations()
             configuration = nil
@@ -70,22 +137,25 @@ final class TranslationService {
         }
 
         guard let source = sourceLanguage else {
-            // No source language set — don't create a session (avoid auto-detect popup)
             return
         }
 
-        // Avoid triggering if source and target are the same language
         if source.languageCode == targetLanguage.languageCode {
             return
         }
 
-        // Cancel any in-flight translations before invalidating the old session
         cancelAllTranslations()
 
         if configuration != nil {
             configuration?.invalidate()
         }
         session = nil
+
+        if force {
+            // Nil out first so SwiftUI sees a state change even if the new config is "equal"
+            configuration = nil
+        }
+
         configuration = TranslationSession.Configuration(
             source: source,
             target: targetLanguage

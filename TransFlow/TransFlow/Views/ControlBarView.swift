@@ -352,11 +352,13 @@ struct ControlBarView: View {
 
     private var translationControls: some View {
         HStack(spacing: 6) {
-            // Translation toggle as a compact icon button
             Button {
                 viewModel.translationService.isEnabled.toggle()
                 if viewModel.translationService.isEnabled {
                     viewModel.translationService.updateSourceLanguage(from: viewModel.selectedLanguage)
+                    Task {
+                        await viewModel.translationService.refreshAndAutoSelect(force: true)
+                    }
                 } else {
                     viewModel.translationService.updateConfiguration()
                 }
@@ -375,30 +377,42 @@ struct ControlBarView: View {
             .buttonStyle(.plain)
             .help(viewModel.translationService.isEnabled ? Text("control.disable_translation") : Text("control.enable_translation"))
 
-            // Target language picker (shown when translation enabled)
             if viewModel.translationService.isEnabled {
                 Menu {
-                    ForEach(commonTranslationLanguages, id: \.minimalIdentifier) { lang in
-                        Button {
-                            viewModel.translationService.targetLanguage = lang
-                            viewModel.translationService.updateConfiguration()
-                        } label: {
-                            HStack {
-                                Text(Locale.current.localizedString(forIdentifier: lang.minimalIdentifier) ?? lang.minimalIdentifier)
-                                if lang.minimalIdentifier == viewModel.translationService.targetLanguage.minimalIdentifier {
-                                    Image(systemName: "checkmark")
+                    let available = viewModel.translationService.availableTargetLanguages
+                    if available.isEmpty {
+                        Text("control.translation_none_available")
+                    } else {
+                        ForEach(available, id: \.minimalIdentifier) { lang in
+                            Button {
+                                viewModel.translationService.targetLanguage = lang
+                                viewModel.translationService.updateConfiguration()
+                            } label: {
+                                HStack {
+                                    Text(Locale.current.localizedString(forIdentifier: lang.minimalIdentifier) ?? lang.minimalIdentifier)
+                                    if lang.minimalIdentifier == viewModel.translationService.targetLanguage.minimalIdentifier {
+                                        Image(systemName: "checkmark")
+                                    }
                                 }
                             }
                         }
                     }
+
+                    Divider()
+
+                    Button {
+                        NotificationCenter.default.post(name: .navigateToSettings, object: nil)
+                    } label: {
+                        Label("model_action.manage_languages", systemImage: "slider.horizontal.3")
+                    }
                 } label: {
                     HStack(spacing: 3) {
-                        Text(targetLanguageShortName)
+                        Text(targetLanguageDisplayName)
                             .font(.system(size: 11, weight: .medium))
                             .lineLimit(1)
                             .frame(maxWidth: 56, alignment: .leading)
                     }
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(targetLanguageIsAvailable ? .primary : .secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
                     .background(
@@ -415,8 +429,17 @@ struct ControlBarView: View {
         .animation(.easeInOut(duration: 0.2), value: viewModel.translationService.isEnabled)
     }
 
-    private var targetLanguageShortName: String {
-        Locale.current.localizedString(
+    private var targetLanguageIsAvailable: Bool {
+        viewModel.translationService.availableTargetLanguages.contains {
+            $0.minimalIdentifier == viewModel.translationService.targetLanguage.minimalIdentifier
+        }
+    }
+
+    private var targetLanguageDisplayName: String {
+        if viewModel.translationService.availableTargetLanguages.isEmpty {
+            return String(localized: "control.translation_unavailable")
+        }
+        return Locale.current.localizedString(
             forIdentifier: viewModel.translationService.targetLanguage.minimalIdentifier
         ) ?? viewModel.translationService.targetLanguage.minimalIdentifier
     }
@@ -494,19 +517,6 @@ struct ControlBarView: View {
     // MARK: - Constants
 
     private var commonTranslationLanguages: [Locale.Language] {
-        [
-            Locale.Language(identifier: "zh-Hans"),
-            Locale.Language(identifier: "zh-Hant"),
-            Locale.Language(identifier: "en"),
-            Locale.Language(identifier: "ja"),
-            Locale.Language(identifier: "ko"),
-            Locale.Language(identifier: "fr"),
-            Locale.Language(identifier: "de"),
-            Locale.Language(identifier: "es"),
-            Locale.Language(identifier: "pt"),
-            Locale.Language(identifier: "ru"),
-            Locale.Language(identifier: "ar"),
-            Locale.Language(identifier: "it"),
-        ]
+        TranslationService.supportedTargetLanguages
     }
 }
