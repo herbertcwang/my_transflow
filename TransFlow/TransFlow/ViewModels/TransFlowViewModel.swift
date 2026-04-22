@@ -158,6 +158,125 @@ final class TransFlowViewModel {
         }
     }
 
+    /// Enable translation and, if currently listening, restart the transcription
+    /// pipeline so a fresh `TranslationSession` is picked up before the engine
+    /// resumes emitting events.
+    ///
+    /// This is the single entry point for turning translation ON. It exists to
+    /// avoid two races we had before:
+    ///   1. `translateSentence` / `translatePartial` guard on `session != nil`,
+    ///      but the session only becomes available after `.translationTask`
+    ///      finishes preparing — which races with incoming engine events.
+    ///   2. Callers that fired multiple concurrent Tasks each calling
+    ///      `refreshAndAutoSelect` could interleave and leave the config in a
+    ///      state where `.translationTask` never re-fires.
+    func enableTranslation() {
+        guard !translationService.isEnabled else { return }
+        translationService.isEnabled = true
+        translationService.updateSourceLanguage(from: selectedLanguage)
+
+        let wasListening = listeningState == .active
+        if wasListening {
+            ErrorLogger.shared.log(
+                "Enabling translation while listening — restarting pipeline",
+                source: "Translation"
+            )
+            stopListening()
+        } else {
+            ErrorLogger.shared.log(
+                "Enabling translation while idle — preparing config only",
+                source: "Translation"
+            )
+        }
+
+        Task {
+            await translationService.refreshAndAutoSelect(force: true)
+            if wasListening {
+                startListening()
+            }
+        }
+    }
+
+    /// Disable translation. Keeps the transcription pipeline running — only tears
+    /// down the translation session so future sentences won't request translation.
+    func disableTranslation() {
+        guard translationService.isEnabled else { return }
+        ErrorLogger.shared.log("Disabling translation", source: "Translation")
+        translationService.isEnabled = false
+        translationService.updateConfiguration()
+    }
+
+    /// Convenience for UI toggles and global hotkeys.
+    func toggleTranslation() {
+        if translationService.isEnabled {
+            disableTranslation()
+        } else {
+            enableTranslation()
+        }
+    }
+
+    /// Enable or disable live speaker diarization.
+    ///
+    /// Diarization is instantiated inside `startListening()` based on
+    /// `AppSettings.liveEnableDiarization`, so toggling the setting mid-session
+    /// alone does nothing — the UI flips but the pipeline keeps its old state
+    /// (same class of bug as translation toggle). This method restarts the
+    /// transcription pipeline when listening so the new setting takes effect
+    /// immediately.
+    func setDiarizationEnabled(_ enabled: Bool) {
+        guard AppSettings.shared.liveEnableDiarization != enabled else { return }
+        AppSettings.shared.liveEnableDiarization = enabled
+
+        let wasListening = listeningState == .active
+        if wasListening {
+            ErrorLogger.shared.log(
+                "Changing diarization to \(enabled) while listening — restarting pipeline",
+                source: "RealtimeDiarization"
+            )
+            stopListening()
+            Task {
+                startListening()
+            }
+        } else {
+            ErrorLogger.shared.log(
+                "Changing diarization to \(enabled) while idle — setting only",
+                source: "RealtimeDiarization"
+            )
+        }
+    }
+
+    /// Convenience for UI toggle.
+    func toggleDiarization() {
+        setDiarizationEnabled(!AppSettings.shared.liveEnableDiarization)
+    }
+
+    /// Change the translation target language. When listening, restart the
+    /// pipeline so the new session is fully ready before the next utterance —
+    /// mirroring the behavior of `switchLanguage(to:)` for source language.
+    func setTranslationTargetLanguage(_ lang: Locale.Language) {
+        guard translationService.isEnabled else {
+            translationService.targetLanguage = lang
+            return
+        }
+        translationService.targetLanguage = lang
+
+        let wasListening = listeningState == .active
+        if wasListening {
+            ErrorLogger.shared.log(
+                "Changing translation target to \(lang.minimalIdentifier) while listening — restarting pipeline",
+                source: "Translation"
+            )
+            stopListening()
+        }
+
+        Task {
+            translationService.updateConfiguration(force: true)
+            if wasListening {
+                startListening()
+            }
+        }
+    }
+
     // MARK: - App Audio
 
     func refreshAvailableApps() async {

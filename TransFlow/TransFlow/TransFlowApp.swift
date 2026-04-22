@@ -45,15 +45,7 @@ struct TransFlowApp: App {
                 viewModel.toggleListening()
             },
             onToggleTranslation: { [viewModel] in
-                viewModel.translationService.isEnabled.toggle()
-                if viewModel.translationService.isEnabled {
-                    viewModel.translationService.updateSourceLanguage(from: viewModel.selectedLanguage)
-                    Task {
-                        await viewModel.translationService.refreshAndAutoSelect(force: true)
-                    }
-                } else {
-                    viewModel.translationService.updateConfiguration()
-                }
+                viewModel.toggleTranslation()
             },
             onToggleFloatingPreview: { [floatingPreviewManager, settings] in
                 floatingPreviewManager.toggle(

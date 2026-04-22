@@ -353,15 +353,7 @@ struct ControlBarView: View {
     private var translationControls: some View {
         HStack(spacing: 6) {
             Button {
-                viewModel.translationService.isEnabled.toggle()
-                if viewModel.translationService.isEnabled {
-                    viewModel.translationService.updateSourceLanguage(from: viewModel.selectedLanguage)
-                    Task {
-                        await viewModel.translationService.refreshAndAutoSelect(force: true)
-                    }
-                } else {
-                    viewModel.translationService.updateConfiguration()
-                }
+                viewModel.toggleTranslation()
             } label: {
                 Image(systemName: "translate")
                     .font(.system(size: 12, weight: .medium))
@@ -385,8 +377,7 @@ struct ControlBarView: View {
                     } else {
                         ForEach(available, id: \.minimalIdentifier) { lang in
                             Button {
-                                viewModel.translationService.targetLanguage = lang
-                                viewModel.translationService.updateConfiguration()
+                                viewModel.setTranslationTargetLanguage(lang)
                             } label: {
                                 HStack {
                                     Text(Locale.current.localizedString(forIdentifier: lang.minimalIdentifier) ?? lang.minimalIdentifier)
@@ -448,7 +439,7 @@ struct ControlBarView: View {
 
     private var diarizationToggle: some View {
         Button {
-            settings.liveEnableDiarization.toggle()
+            viewModel.toggleDiarization()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "person.2.wave.2")

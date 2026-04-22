@@ -118,19 +118,40 @@ final class TranslationService {
 
     /// Update the source language from the transcription locale.
     /// Call this whenever the transcription language changes.
+    /// Uses `force: true` so SwiftUI always observes a config change and
+    /// `.translationTask` re-fires to produce a new `TranslationSession`
+    /// — otherwise callers may see a stale session for the old source language.
     func updateSourceLanguage(from transcriptionLocale: Locale) {
         sourceLanguage = Self.translationLanguage(from: transcriptionLocale)
         if isEnabled {
-            updateConfiguration()
+            updateConfiguration(force: true)
         }
     }
 
     /// Update the configuration to trigger a new translation session.
-    /// Set `force` to true to always recreate the configuration (e.g. when re-enabling the toggle).
+    ///
+    /// Per Apple's guidance (`TranslationSession.Configuration.invalidate()`), the
+    /// correct way to re-fire `.translationTask` for the *same* language pair is to
+    /// call `invalidate()` on the existing configuration — reassigning a new
+    /// equivalent Configuration does NOT reliably fire the task because SwiftUI
+    /// compares configurations for equality across render passes. This was the
+    /// root cause of the "toggle off/on drops translations" bug: the second ON
+    /// would assign a fresh Config equal to the first, SwiftUI coalesced it, and
+    /// `.translationTask` never re-fired, leaving `session == nil` forever.
+    ///
+    /// Strategy:
+    /// - Keep the Configuration object alive across toggle off/on cycles; only
+    ///   clear it when the source/target language actually changes.
+    /// - Disabling translation: set `session = nil` and keep `configuration`. The
+    ///   `isEnabled` guard in translate* already silences actual translation calls.
+    /// - Enabling translation: if an existing config's pair matches, call
+    ///   `invalidate()` — this is the only reliable re-trigger. If pair differs
+    ///   or config is nil, create a new one.
+    /// - `force` invalidates even when nothing else would (used for toggle ON,
+    ///   target change, and source change).
     func updateConfiguration(force: Bool = false) {
         guard isEnabled else {
             cancelAllTranslations()
-            configuration = nil
             session = nil
             currentPartialTranslation = ""
             return
@@ -145,17 +166,28 @@ final class TranslationService {
         }
 
         cancelAllTranslations()
-
-        if configuration != nil {
-            configuration?.invalidate()
-        }
         session = nil
 
-        if force {
-            // Nil out first so SwiftUI sees a state change even if the new config is "equal"
-            configuration = nil
+        let pairUnchanged = configuration.map {
+            $0.source?.minimalIdentifier == source.minimalIdentifier
+                && $0.target?.minimalIdentifier == targetLanguage.minimalIdentifier
+        } ?? false
+
+        if configuration != nil, pairUnchanged {
+            if force {
+                ErrorLogger.shared.log(
+                    "Invalidating existing translation configuration (source=\(source.minimalIdentifier), target=\(targetLanguage.minimalIdentifier))",
+                    source: "Translation"
+                )
+                configuration?.invalidate()
+            }
+            return
         }
 
+        ErrorLogger.shared.log(
+            "Creating new translation configuration (source=\(source.minimalIdentifier), target=\(targetLanguage.minimalIdentifier))",
+            source: "Translation"
+        )
         configuration = TranslationSession.Configuration(
             source: source,
             target: targetLanguage
