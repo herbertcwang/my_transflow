@@ -22,6 +22,9 @@ struct TransFlowApp: App {
                     updateChecker.checkOnceOnLaunch()
                     configureGlobalHotkeys()
                 }
+                .sheet(isPresented: $updateChecker.showUpdateAlert) {
+                    UpdateAlertView(updateChecker: updateChecker, settings: settings)
+                }
         }
         .windowStyle(.automatic)
         .defaultSize(width: 720, height: 520)

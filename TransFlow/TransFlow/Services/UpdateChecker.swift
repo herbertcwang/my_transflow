@@ -18,6 +18,7 @@ final class UpdateChecker {
     static let shared = UpdateChecker()
 
     private(set) var status: UpdateStatus = .idle
+    var showUpdateAlert = false
 
     private static let owner = "Cyronlee"
     private static let repo = "TransFlow"
@@ -35,7 +36,15 @@ final class UpdateChecker {
 
     func checkOnceOnLaunch() {
         guard !hasCheckedThisSession else { return }
-        Task { await check() }
+        Task {
+            await check()
+            if case .updateAvailable(let version, _) = status {
+                let skipped = AppSettings.shared.skippedUpdateVersion
+                if skipped != version {
+                    showUpdateAlert = true
+                }
+            }
+        }
     }
 
     func checkForUpdates() {

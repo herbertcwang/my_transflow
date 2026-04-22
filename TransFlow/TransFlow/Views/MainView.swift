@@ -2,7 +2,8 @@ import SwiftUI
 import Translation
 
 /// Root view with NavigationSplitView providing a collapsible sidebar.
-/// The sidebar starts collapsed (detail only) for a clean initial appearance.
+/// On first launch the sidebar is expanded so users can discover navigation;
+/// subsequent launches remember the collapsed state.
 ///
 /// The shared ViewModel is injected from app root so it survives sidebar navigation
 /// (switching between Transcription / History / Settings) and can be reused by
@@ -18,8 +19,13 @@ struct MainView: View {
     @Bindable var settings: AppSettings
 
     @State private var selectedDestination: SidebarDestination = .transcription
-    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
+    @State private var columnVisibility: NavigationSplitViewVisibility = Self.initialColumnVisibility
     @State private var pendingHistorySessionID: String?
+
+    private static var initialColumnVisibility: NavigationSplitViewVisibility {
+        let hasLaunched = UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
+        return hasLaunched ? .detailOnly : .doubleColumn
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -30,6 +36,11 @@ struct MainView: View {
         .navigationSplitViewStyle(.balanced)
         .translationTask(viewModel.translationService.configuration) { session in
             await viewModel.translationService.handleSession(session)
+        }
+        .onAppear {
+            if !UserDefaults.standard.bool(forKey: "hasLaunchedBefore") {
+                UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToSettings)) { _ in
             selectedDestination = .settings

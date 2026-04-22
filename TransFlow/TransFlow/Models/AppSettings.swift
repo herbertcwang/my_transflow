@@ -89,6 +89,17 @@ final class AppSettings {
         (floatingPanelFontSize * 0.8).rounded()
     }
 
+    /// Version string the user chose to skip (via "Don't remind" in the update alert).
+    var skippedUpdateVersion: String? {
+        didSet {
+            if let v = skippedUpdateVersion {
+                UserDefaults.standard.set(v, forKey: "skippedUpdateVersion")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "skippedUpdateVersion")
+            }
+        }
+    }
+
     private var isInitialized = false
 
     private init() {
@@ -104,6 +115,8 @@ final class AppSettings {
         } else {
             self.locale = Locale.current
         }
+
+        self.skippedUpdateVersion = UserDefaults.standard.string(forKey: "skippedUpdateVersion")
 
         self.diarizationSensitivity = UserDefaults.standard.object(forKey: "diarizationSensitivity") as? Double ?? 0.8
         self.liveEnableDiarization = UserDefaults.standard.object(forKey: "liveEnableDiarization") as? Bool ?? false
