@@ -3,10 +3,7 @@ import SwiftUI
 /// Fixed top bar displaying the current session filename and a button to create a new session.
 struct SessionBarView: View {
     let sessionName: String
-    let onNewSession: (String) -> Void
-
-    @State private var showingNewSessionSheet = false
-    @State private var newSessionName = ""
+    let onNewSession: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,14 +20,14 @@ struct SessionBarView: View {
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
                 Spacer()
 
-                // New session button on the right
+                // New session button on the right: creates immediately with a default name.
                 Button {
-                    newSessionName = JSONLStore.generateDefaultName()
-                    showingNewSessionSheet = true
+                    onNewSession()
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .semibold))
@@ -49,49 +46,6 @@ struct SessionBarView: View {
             Rectangle()
                 .fill(.separator)
                 .frame(height: 0.5)
-        }
-        .sheet(isPresented: $showingNewSessionSheet) {
-            newSessionSheet
-        }
-    }
-
-    // MARK: - New Session Sheet
-
-    private var trimmedName: String {
-        newSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var newSessionSheet: some View {
-        VStack(spacing: 16) {
-            Text("session.new_session")
-                .font(.system(size: 15, weight: .semibold))
-
-            TextField("session.filename_placeholder", text: $newSessionName)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 13, design: .monospaced))
-                .frame(width: 280)
-
-            HStack(spacing: 12) {
-                Button("session.cancel") {
-                    showingNewSessionSheet = false
-                }
-                .keyboardShortcut(.cancelAction)
-
-                Button("session.create") {
-                    if !trimmedName.isEmpty {
-                        onNewSession(trimmedName)
-                    }
-                    showingNewSessionSheet = false
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(trimmedName.isEmpty)
-            }
-        }
-        .padding(24)
-        .onAppear {
-            if newSessionName.isEmpty {
-                newSessionName = JSONLStore.generateDefaultName()
-            }
         }
     }
 }

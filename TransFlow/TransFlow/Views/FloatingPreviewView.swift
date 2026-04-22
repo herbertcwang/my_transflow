@@ -5,9 +5,11 @@ struct FloatingPreviewView: View {
     @Bindable var viewModel: TransFlowViewModel
     @Bindable var panelManager: FloatingPreviewPanelManager
     @State private var isHovering = false
+    @State private var showDisplaySettings = false
+
+    private var settings: AppSettings { AppSettings.shared }
 
     private let captionBottomAnchor = "floating-caption-bottom"
-    private let maxFinalizedSentenceCount = 4
 
     private static let fontSizeOptions: [CGFloat] = [
         12, 14, 16, 18, 20, 24, 28, 32, 36, 42, 48, 56, 64, 72
@@ -21,6 +23,7 @@ struct FloatingPreviewView: View {
         .padding(2)
         .frame(minWidth: 340, idealWidth: 390, minHeight: 96, alignment: .topLeading)
         .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .opacity(settings.floatingPanelOpacity)
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.16)) {
@@ -57,7 +60,7 @@ struct FloatingPreviewView: View {
 
     private var controlOverlay: some View {
         HStack(spacing: 6) {
-            fontSizeMenu
+            displaySettingsButton
             pinButton
             closeButton
         }
@@ -69,38 +72,6 @@ struct FloatingPreviewView: View {
     }
 
     private static let controlSize: CGFloat = 22
-
-    private var fontSizeMenu: some View {
-        Menu {
-            ForEach(Self.fontSizeOptions, id: \.self) { size in
-                Button {
-                    AppSettings.shared.floatingPanelFontSize = size
-                } label: {
-                    HStack {
-                        Text("\(Int(size)) pt")
-                        if Int(AppSettings.shared.floatingPanelFontSize) == Int(size) {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-            }
-        } label: {
-            Color.clear
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: Self.controlSize, height: Self.controlSize)
-        .overlay {
-            Image(systemName: "textformat.size")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .allowsHitTesting(false)
-        }
-        .contentShape(Circle())
-        .glassEffect(.regular, in: .circle)
-        .help(Text("floating_preview.font_size"))
-        .accessibilityLabel(Text("floating_preview.font_size"))
-    }
 
     private var pinButton: some View {
         Button {
@@ -132,6 +103,108 @@ struct FloatingPreviewView: View {
         .glassEffect(.regular, in: .circle)
         .help(Text("floating_preview.close"))
         .accessibilityLabel(Text("floating_preview.close"))
+    }
+
+    private var displaySettingsButton: some View {
+        Button {
+            showDisplaySettings.toggle()
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: Self.controlSize, height: Self.controlSize)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular, in: .circle)
+        .help(Text("floating_preview.display_settings"))
+        .accessibilityLabel(Text("floating_preview.display_settings"))
+        .popover(isPresented: $showDisplaySettings, arrowEdge: .top) {
+            displaySettingsPopover
+        }
+    }
+
+    private var displaySettingsPopover: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("floating_preview.font_size")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Picker(selection: Binding(
+                    get: {
+                        Self.fontSizeOptions.min(by: {
+                            abs($0 - settings.floatingPanelFontSize) < abs($1 - settings.floatingPanelFontSize)
+                        }) ?? settings.floatingPanelFontSize
+                    },
+                    set: { settings.floatingPanelFontSize = $0 }
+                )) {
+                    ForEach(Self.fontSizeOptions, id: \.self) { size in
+                        Text("\(Int(size)) pt").tag(size)
+                    }
+                } label: {
+                    EmptyView()
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+                .labelsHidden()
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("floating_preview.opacity")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+
+                    Spacer()
+
+                    Text("\(Int((settings.floatingPanelOpacity * 100).rounded()))%")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Slider(
+                    value: Binding(
+                        get: { settings.floatingPanelOpacity },
+                        set: { settings.floatingPanelOpacity = $0 }
+                    ),
+                    in: AppSettings.minFloatingPanelOpacity...1.0
+                )
+                .controlSize(.small)
+            }
+
+            Divider()
+
+            // Max entries picker
+            HStack {
+                Text("floating_preview.max_entries")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Picker(selection: Binding(
+                    get: { settings.floatingPanelMaxEntries },
+                    set: { settings.floatingPanelMaxEntries = $0 }
+                )) {
+                    ForEach(FloatingPanelMaxEntries.allCases) { option in
+                        Text(option.displayName).tag(option)
+                    }
+                } label: {
+                    EmptyView()
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+                .labelsHidden()
+            }
+        }
+        .padding(14)
+        .frame(width: 240)
     }
 
     private var sourceFontSize: CGFloat {
@@ -174,7 +247,14 @@ struct FloatingPreviewView: View {
         let showTranslation = viewModel.translationService.isEnabled
         var lines: [CaptionLine] = []
 
-        for sentence in viewModel.sentences.suffix(maxFinalizedSentenceCount) {
+        let finalizedSentences: [TranscriptionSentence]
+        if let limit = settings.floatingPanelMaxEntries.limit {
+            finalizedSentences = Array(viewModel.sentences.suffix(limit))
+        } else {
+            finalizedSentences = viewModel.sentences
+        }
+
+        for sentence in finalizedSentences {
             let sourceText = sentence.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !sourceText.isEmpty {
                 let prefix = sentence.speakerId.map { SpeakerDisplayName.displayName(for: $0) + ": " } ?? ""

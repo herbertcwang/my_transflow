@@ -15,8 +15,8 @@ struct ContentView: View {
             // ── Top: Session bar ──
             SessionBarView(
                 sessionName: viewModel.jsonlStore.currentSessionName
-            ) { name in
-                viewModel.createNewSession(name: name)
+            ) {
+                viewModel.createNewSession()
             }
 
             // ── Middle: Transcription history ──

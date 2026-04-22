@@ -53,6 +53,36 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 }
 
+/// Maximum number of finalized caption entries to keep in the floating preview panel.
+/// `all` means no limit (all available entries are shown).
+enum FloatingPanelMaxEntries: Int, CaseIterable, Identifiable {
+    case five = 5
+    case twenty = 20
+    case oneHundred = 100
+    case all = -1
+
+    var id: Int { rawValue }
+
+    /// Resolved numeric limit. `nil` means unlimited.
+    var limit: Int? {
+        switch self {
+        case .five: 5
+        case .twenty: 20
+        case .oneHundred: 100
+        case .all: nil
+        }
+    }
+
+    var displayName: LocalizedStringKey {
+        switch self {
+        case .five: "floating_preview.max_entries.5"
+        case .twenty: "floating_preview.max_entries.20"
+        case .oneHundred: "floating_preview.max_entries.100"
+        case .all: "floating_preview.max_entries.all"
+        }
+    }
+}
+
 /// Centralized app settings persisted via UserDefaults.
 @Observable
 @MainActor
@@ -87,6 +117,28 @@ final class AppSettings {
     /// Translation text is rendered proportionally smaller.
     var floatingPanelTranslationFontSize: CGFloat {
         (floatingPanelFontSize * 0.8).rounded()
+    }
+
+    /// Opacity of the floating preview panel. Clamped to `Self.minFloatingPanelOpacity...1.0`
+    /// so the panel never becomes fully invisible.
+    var floatingPanelOpacity: Double {
+        didSet {
+            let clamped = min(max(floatingPanelOpacity, Self.minFloatingPanelOpacity), 1.0)
+            if clamped != floatingPanelOpacity {
+                floatingPanelOpacity = clamped
+                return
+            }
+            UserDefaults.standard.set(floatingPanelOpacity, forKey: "floatingPanelOpacity")
+        }
+    }
+
+    static let minFloatingPanelOpacity: Double = 0.3
+
+    /// Maximum number of finalized caption entries to keep in the floating preview.
+    var floatingPanelMaxEntries: FloatingPanelMaxEntries {
+        didSet {
+            UserDefaults.standard.set(floatingPanelMaxEntries.rawValue, forKey: "floatingPanelMaxEntries")
+        }
     }
 
     /// Version string the user chose to skip (via "Don't remind" in the update alert).
@@ -129,6 +181,17 @@ final class AppSettings {
         self.floatingPanelFontSize = storedFontSize > 0
             ? CGFloat(storedFontSize)
             : Self.recommendedFloatingPanelFontSize()
+
+        let storedOpacity = UserDefaults.standard.object(forKey: "floatingPanelOpacity") as? Double
+        self.floatingPanelOpacity = {
+            guard let value = storedOpacity else { return 1.0 }
+            return min(max(value, Self.minFloatingPanelOpacity), 1.0)
+        }()
+
+        let storedMaxEntriesRaw = UserDefaults.standard.object(forKey: "floatingPanelMaxEntries") as? Int
+        self.floatingPanelMaxEntries = storedMaxEntriesRaw
+            .flatMap { FloatingPanelMaxEntries(rawValue: $0) }
+            ?? .five
 
         self.hotkeyToggleTranscription = .empty
         self.hotkeyToggleTranslation = .empty

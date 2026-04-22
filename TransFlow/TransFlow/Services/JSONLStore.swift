@@ -239,7 +239,9 @@ final class JSONLStore {
     static func generateDefaultName() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        return formatter.string(from: Date())
+        let timestamp = formatter.string(from: Date())
+        let prefix = String(localized: "session.default_name_prefix")
+        return "\(prefix) \(timestamp)"
     }
 
     private func encodeLine(_ line: JSONLLine) -> String? {
