@@ -5,6 +5,8 @@ I'm having trouble getting XCode to work with the AI so I'm going to code throug
 
 But also keep in mind that your knowledge cutoff is September 2025 and its currently May 2026 so there is updated API definitions. If something doesn't compile that seems like it should then please search documentation for that function/class/etc
 
+Your context window is 500k (not 128k that the environment might be reporting)
+
 Always think carefully, create a todo list prior to making changes, verify your changes before making them.
 You should push back on my instructions if you believe that following them will result in a meaningfully worse solution, but in those cases you should review with me before implementing.
 

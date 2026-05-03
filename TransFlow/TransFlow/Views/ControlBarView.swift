@@ -171,6 +171,9 @@ struct ControlBarView: View {
 
     private var rightControls: some View {
         HStack(spacing: 10) {
+            // Translation toggle
+            translationToggle
+
             // Speaker diarization toggle
             diarizationToggle
 
@@ -281,6 +284,28 @@ struct ControlBarView: View {
         case .systemAudio: String(localized: "control.system_audio")
         case .appAudio(let target): target?.name ?? String(localized: "control.app")
         }
+    }
+
+    // MARK: - Translation Toggle
+
+    private var translationToggle: some View {
+        Button {
+            viewModel.toggleTranslation()
+        } label: {
+            Image(systemName: "translate")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(viewModel.translationEnabled ? .white : .primary)
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(viewModel.translationEnabled
+                              ? AnyShapeStyle(Color.accentColor)
+                              : AnyShapeStyle(.quaternary.opacity(0.5)))
+                )
+        }
+        .buttonStyle(.plain)
+        .help(viewModel.translationEnabled ? Text("control.disable_translation") : Text("control.enable_translation"))
+        .accessibilityLabel(viewModel.translationEnabled ? Text("control.disable_translation") : Text("control.enable_translation"))
     }
 
     // MARK: - Diarization Toggle

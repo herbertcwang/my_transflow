@@ -1,5 +1,6 @@
 import Speech
 import CoreMedia
+import NaturalLanguage
 @preconcurrency import AVFoundation
 
 /// Uses macOS 26.0 SpeechAnalyzer with two SpeechTranscriber instances (en-US + zh-Hans)
@@ -126,37 +127,68 @@ final class MultilingualSpeechEngine: Sendable {
                                 if result.isFinal {
                                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                                     if !trimmed.isEmpty {
-                                        let range = result.range
-                                        let startSec = CMTimeGetSeconds(range.start)
-                                        let endSec = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
-                                        let startDate = startSec.isFinite
-                                            ? capturedStartDate.addingTimeInterval(startSec)
-                                            : Date()
-                                        let endDate = endSec.isFinite
-                                            ? capturedStartDate.addingTimeInterval(endSec)
-                                            : Date()
-                                        innerContinuation.yield(.sentenceComplete(
-                                            TranscriptionSentence(
-                                                startTimestamp: startDate,
-                                                timestamp: endDate,
-                                                text: trimmed,
-                                                detectedLanguage: detectedLanguage
+                                        // ── Language verification via NLLanguageRecognizer ──
+                                        // Skip results where the dominant language doesn't match
+                                        // the transcriber's locale. This eliminates the "two of
+                                        // everything" problem where both EN and ZH transcribers
+                                        // fire for every utterance.
+                                        var languageMatches = true
+                                        if !trimmed.isEmpty {
+                                            let recognizer = NLLanguageRecognizer()
+                                            recognizer.processString(trimmed)
+                                            if let dominant = recognizer.dominantLanguage {
+                                                let code = dominant.rawValue
+                                                switch detectedLanguage {
+                                                case "en":
+                                                    languageMatches = code == "en"
+                                                case "zh":
+                                                    languageMatches = code.hasPrefix("zh")
+                                                default:
+                                                    break
+                                                }
+                                                if !languageMatches {
+                                                    await ErrorLogger.shared.log(
+                                                        "MultilingualSpeech: filtered \(detectedLanguage) result (dominant=\(code)): \(trimmed.prefix(40))...",
+                                                        source: "MultilingualSpeech"
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        if languageMatches {
+                                            let range = result.range
+                                            let startSec = CMTimeGetSeconds(range.start)
+                                            let endSec = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+                                            let startDate = startSec.isFinite
+                                                ? capturedStartDate.addingTimeInterval(startSec)
+                                                : Date()
+                                            let endDate = endSec.isFinite
+                                                ? capturedStartDate.addingTimeInterval(endSec)
+                                                : Date()
+                                            innerContinuation.yield(.sentenceComplete(
+                                                TranscriptionSentence(
+                                                    startTimestamp: startDate,
+                                                    timestamp: endDate,
+                                                    text: trimmed,
+                                                    detectedLanguage: detectedLanguage
+                                                )
+                                            ))
+                                            await ErrorLogger.shared.log(
+                                                "MultilingualSpeech: final \(detectedLanguage): \(trimmed.prefix(40))...",
+                                                source: "MultilingualSpeech"
                                             )
-                                        ))
-                                        await ErrorLogger.shared.log(
-                                            "MultilingualSpeech: final \(detectedLanguage): \(trimmed.prefix(40))...",
-                                            source: "MultilingualSpeech"
-                                        )
-                                        // Clear partial for this locale
+                                        }
+
+                                        // Clear partial for this locale (regardless of match)
                                         innerContinuation.yield(.partial(""))
                                     }
                                 } else {
-                                    // Tag partial results with locale so we can distinguish them
-                                        await ErrorLogger.shared.log(
-                                            "MultilingualSpeech: partial \(detectedLanguage): \(text.prefix(40))...",
-                                            source: "MultilingualSpeech"
-                                        )
-                                        innerContinuation.yield(.partial("[\(detectedLanguage)] \(text)"))
+                    // Tag partial results with locale so we can distinguish them
+                        await ErrorLogger.shared.log(
+                            "MultilingualSpeech: partial \(detectedLanguage): \(text.prefix(40))...",
+                            source: "MultilingualSpeech"
+                        )
+                        innerContinuation.yield(.partial("[\(detectedLanguage)] \(text)"))
                                 }
                             }
                         } catch {

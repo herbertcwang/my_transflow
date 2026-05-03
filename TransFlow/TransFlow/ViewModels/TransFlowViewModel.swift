@@ -1,5 +1,6 @@
 import SwiftUI
 import Speech
+import Translation
 
 /// Main ViewModel coordinating all services: audio capture, Apple Speech multilingual ASR, and recording.
 @Observable
@@ -30,6 +31,18 @@ final class TransFlowViewModel {
 
     /// Apple Speech model manager for bilingual EN/ZH.
     let speechModelManager = SpeechModelManager.shared
+
+    /// Translation service for Chinese→English live translation.
+    @ObservationIgnored private let translationService = TranslationService()
+    var translationEnabled: Bool {
+        translationService.isEnabled
+    }
+    var partialTranslation: String {
+        translationService.currentPartialTranslation
+    }
+    var translationServiceConfiguration: TranslationSession.Configuration? {
+        translationService.configuration
+    }
 
     /// JSONL persistence store for the current session.
     let jsonlStore = JSONLStore()
@@ -74,6 +87,28 @@ final class TransFlowViewModel {
             await initialize()
         }
         setupLifecycleObserver()
+        setupTranslationObserver()
+    }
+
+    /// Set up translation service defaults: source=Chinese → target=English.
+    private func setupTranslationObserver() {
+        translationService.updateSourceLanguage(from: Locale(identifier: "zh-Hans"))
+        translationService.targetLanguage = Locale.Language(identifier: "en")
+    }
+
+    /// Enable or disable live translation.
+    func setTranslationEnabled(_ enabled: Bool) {
+        translationService.isEnabled = enabled
+        if enabled {
+            Task { await translationService.refreshAndAutoSelect(force: true) }
+        } else {
+            translationService.clearSession()
+        }
+    }
+
+    /// Called from .translationTask in ContentView.
+    func handleTranslationSession(_ session: TranslationSession) async {
+        await translationService.handleSession(session)
     }
 
     private func initialize() async {
@@ -282,11 +317,39 @@ final class TransFlowViewModel {
                             partialStartTimestamp = Date()
                         }
                         currentPartialText = text
+                        // Trigger partial translation for Chinese text
+                        if translationService.isEnabled {
+                            translationService.translatePartial(text)
+                        }
 
                     case .sentenceComplete(var sentence):
                         if isDiarizationEnabled {
                             sentence.speakerId = assignSpeaker(for: sentence)
                         }
+                        // Translate Chinese sentences to English
+                        if translationService.isEnabled,
+                           sentence.detectedLanguage == "zh",
+                           !sentence.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            // Fire-and-forget translation; attach result when ready
+                            let textToTranslate = sentence.text
+                            Task { [weak self] in
+                                guard let self else { return }
+                                if let translated = await self.translationService.translateSentence(textToTranslate),
+                                   !Task.isCancelled {
+                                    // Find and update the sentence
+                                    if let idx = await MainActor.run(body: {
+                                        self.sentences.firstIndex(where: { $0.id == sentence.id })
+                                    }) {
+                                        await MainActor.run {
+                                            self.sentences[idx].translation = translated
+                                            // Also update JSONL
+                                            self.rewriteJSONLWithCurrentSentences()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         sentences.append(sentence)
                         jsonlStore.appendEntry(sentence: sentence)
                         currentPartialText = ""
@@ -425,6 +488,11 @@ final class TransFlowViewModel {
     /// Convenience for UI toggle.
     func toggleDiarization() {
         setDiarizationEnabled(!AppSettings.shared.liveEnableDiarization)
+    }
+
+    /// Convenience for UI toggle.
+    func toggleTranslation() {
+        setTranslationEnabled(!translationService.isEnabled)
     }
 
     /// Handle incoming diarization segments from the streaming pipeline.

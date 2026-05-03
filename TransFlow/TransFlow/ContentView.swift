@@ -1,4 +1,5 @@
 import SwiftUI
+@preconcurrency import Translation
 
 /// Main content view with history area on top and unified bottom panel
 /// (live preview + controls).
@@ -22,7 +23,7 @@ struct ContentView: View {
             // ── Middle: Transcription history ──
             TranscriptionView(
                 sentences: viewModel.sentences,
-                isTranslationEnabled: false
+                isTranslationEnabled: viewModel.translationEnabled
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -55,6 +56,10 @@ struct ContentView: View {
         // Menu command handlers
         .onReceive(NotificationCenter.default.publisher(for: .clearHistory)) { _ in
             viewModel.clearHistory()
+        }
+        // Translation session for live Chinese→English
+        .translationTask(viewModel.translationServiceConfiguration) { session in
+            await viewModel.handleTranslationSession(session)
         }
     }
 
@@ -137,7 +142,7 @@ struct BottomPanelView: View {
     }
 
     private var partialTranslationText: String? {
-        nil
+        viewModel.partialTranslation
     }
 }
 
