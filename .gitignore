@@ -19,6 +19,8 @@ xcuserdata/
 *.xcscmblueprint
 *.xcschememanagement.plist
 
+temp-scripts/
+
 # Swift Package Manager
 .build/
 Packages/

@@ -11,14 +11,17 @@ struct TranscriptionSentence: Identifiable, Sendable {
     var translation: String?
     /// Assigned speaker (e.g. "speaker_0"), nil if diarization disabled or pending
     var speakerId: String?
+    /// Detected language code (e.g. "zh", "en") from multilingual ASR; nil for single-locale Apple Speech
+    var detectedLanguage: String?
 
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         startTimestamp: Date,
         timestamp: Date,
         text: String,
         translation: String? = nil,
-        speakerId: String? = nil
+        speakerId: String? = nil,
+        detectedLanguage: String? = nil
     ) {
         self.id = id
         self.startTimestamp = startTimestamp
@@ -26,6 +29,7 @@ struct TranscriptionSentence: Identifiable, Sendable {
         self.text = text
         self.translation = translation
         self.speakerId = speakerId
+        self.detectedLanguage = detectedLanguage
     }
 }
 

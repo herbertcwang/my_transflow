@@ -84,12 +84,27 @@ final class AudioCaptureService: @unchecked Sendable {
         return (stream, stop)
     }
 
-    /// Request microphone permission.
+    /// Check current microphone permission status without prompting.
+    static func currentPermissionStatus() -> AVAuthorizationStatus {
+        AVCaptureDevice.authorizationStatus(for: .audio)
+    }
+
+    /// Request microphone permission using modern AVAudioApplication API.
+    /// Only prompts the user if status is .undetermined; returns immediately otherwise.
     static func requestPermission() async -> Bool {
-        await withCheckedContinuation { continuation in
-            AVAudioApplication.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            return false
+        case .undetermined:
+            return await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
             }
+        @unknown default:
+            return false
         }
     }
 

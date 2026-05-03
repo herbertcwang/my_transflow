@@ -34,6 +34,23 @@ final class UpdateChecker {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     }
 
+    var updateAvailable: Bool {
+        if case .updateAvailable = status { return true }
+        return false
+    }
+
+    var updateURL: URL? {
+        if case .updateAvailable(_, let version) = status {
+            return URL(string: "https://github.com/Cyronlee/TransFlow/releases/tag/v\(version)")
+        }
+        return nil
+    }
+
+    var isChecking: Bool {
+        if case .checking = status { return true }
+        return false
+    }
+
     func checkOnceOnLaunch() {
         guard !hasCheckedThisSession else { return }
         Task {

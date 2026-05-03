@@ -1,7 +1,7 @@
 import SwiftUI
 import Speech
 
-/// Main ViewModel coordinating all services: audio capture, speech engine, translation, and recording.
+/// Main ViewModel coordinating all services: audio capture, Apple Speech multilingual ASR, and recording.
 @Observable
 @MainActor
 final class TransFlowViewModel {
@@ -19,10 +19,6 @@ final class TransFlowViewModel {
     var audioLevelHistory: [Float] = Array(repeating: 0, count: 30)
     /// Selected audio source
     var audioSource: AudioSourceType = .microphone
-    /// Selected transcription language
-    var selectedLanguage: Locale = Locale(identifier: "en-US")
-    /// Available transcription languages (installed/ready only)
-    var availableLanguages: [Locale] = []
     /// Available apps for audio capture
     var availableApps: [AppAudioTarget] = []
     /// Error message
@@ -32,11 +28,8 @@ final class TransFlowViewModel {
     /// Microphone permission granted
     var micPermissionGranted: Bool = false
 
-    /// Translation service (observed separately for SwiftUI binding)
-    let translationService = TranslationService()
-
-    /// Speech model manager for asset checking and downloading.
-    let modelManager = SpeechModelManager.shared
+    /// Apple Speech model manager for bilingual EN/ZH.
+    let speechModelManager = SpeechModelManager.shared
 
     /// JSONL persistence store for the current session.
     let jsonlStore = JSONLStore()
@@ -51,7 +44,6 @@ final class TransFlowViewModel {
 
     private let audioCaptureService = AudioCaptureService()
     private let audioRecordingService = AudioRecordingService()
-    private var speechEngine: SpeechEngine?
     private var stopAudioCapture: (@Sendable () -> Void)?
     private var listeningTask: Task<Void, Never>?
     private var audioLevelTask: Task<Void, Never>?
@@ -74,6 +66,7 @@ final class TransFlowViewModel {
     /// Diarization segments received so far, used for backfilling sentences.
     private var diarizationSegments: [RealtimeDiarizationService.SpeakerSegment] = []
 
+
     // MARK: - Initialization
 
     init() {
@@ -86,11 +79,9 @@ final class TransFlowViewModel {
     private func initialize() async {
         jsonlStore.createSession()
         micPermissionGranted = await AudioCaptureService.requestPermission()
-        translationService.updateSourceLanguage(from: selectedLanguage)
         DiarizationModelManager.shared.checkStatus()
-        await refreshInstalledLanguages()
         await refreshAvailableApps()
-        await modelManager.checkCurrentStatus(for: selectedLanguage)
+        // Apple Speech model statuses will be checked lazily on first startListening()
     }
 
     private func setupLifecycleObserver() {
@@ -102,177 +93,13 @@ final class TransFlowViewModel {
             guard let self else { return }
             Task { @MainActor in
                 ErrorLogger.shared.log(
-                    "App became active — listeningState=\(self.listeningState), selectedLanguage=\(self.selectedLanguage.identifier)",
+                    "App became active — listeningState=\(self.listeningState)",
                     source: "Transcription"
                 )
                 guard self.listeningState == .idle else { return }
                 DiarizationModelManager.shared.checkStatus()
-                await self.refreshInstalledLanguages()
-                await self.modelManager.checkCurrentStatus(for: self.selectedLanguage)
-            }
-        }
-    }
-
-    // MARK: - Language
-
-    func loadSupportedLanguages() async {
-        await refreshInstalledLanguages()
-    }
-
-    func refreshInstalledLanguages() async {
-        await modelManager.refreshAllStatuses()
-        let supportedLanguages = modelManager.supportedLocales.sorted { $0.identifier < $1.identifier }
-        availableLanguages = supportedLanguages.filter { locale in
-            (modelManager.localeStatuses[locale.identifier] ?? .checking).isReady
-        }
-
-        guard !availableLanguages.isEmpty else { return }
-
-        let selectedIdentifier = selectedLanguage.identifier
-        if !availableLanguages.contains(where: { $0.identifier == selectedIdentifier }) {
-            selectedLanguage = availableLanguages[0]
-            translationService.updateSourceLanguage(from: selectedLanguage)
-        }
-    }
-
-    func switchLanguage(to locale: Locale) {
-        let wasListening = listeningState == .active
-        if wasListening {
-            stopListening()
-        }
-        selectedLanguage = locale
-        speechEngine = SpeechEngine(locale: locale)
-        translationService.updateSourceLanguage(from: locale)
-
-        Task {
-            await modelManager.checkCurrentStatus(for: locale)
-            if !modelManager.currentModelStatus.isReady {
-                await modelManager.ensureModelReady(for: locale)
-            }
-            if translationService.isEnabled {
-                await translationService.refreshAndAutoSelect()
-            }
-            if wasListening {
-                startListening()
-            }
-        }
-    }
-
-    /// Enable translation and, if currently listening, restart the transcription
-    /// pipeline so a fresh `TranslationSession` is picked up before the engine
-    /// resumes emitting events.
-    ///
-    /// This is the single entry point for turning translation ON. It exists to
-    /// avoid two races we had before:
-    ///   1. `translateSentence` / `translatePartial` guard on `session != nil`,
-    ///      but the session only becomes available after `.translationTask`
-    ///      finishes preparing — which races with incoming engine events.
-    ///   2. Callers that fired multiple concurrent Tasks each calling
-    ///      `refreshAndAutoSelect` could interleave and leave the config in a
-    ///      state where `.translationTask` never re-fires.
-    func enableTranslation() {
-        guard !translationService.isEnabled else { return }
-        translationService.isEnabled = true
-        translationService.updateSourceLanguage(from: selectedLanguage)
-
-        let wasListening = listeningState == .active
-        if wasListening {
-            ErrorLogger.shared.log(
-                "Enabling translation while listening — restarting pipeline",
-                source: "Translation"
-            )
-            stopListening()
-        } else {
-            ErrorLogger.shared.log(
-                "Enabling translation while idle — preparing config only",
-                source: "Translation"
-            )
-        }
-
-        Task {
-            await translationService.refreshAndAutoSelect(force: true)
-            if wasListening {
-                startListening()
-            }
-        }
-    }
-
-    /// Disable translation. Keeps the transcription pipeline running — only tears
-    /// down the translation session so future sentences won't request translation.
-    func disableTranslation() {
-        guard translationService.isEnabled else { return }
-        ErrorLogger.shared.log("Disabling translation", source: "Translation")
-        translationService.isEnabled = false
-        translationService.updateConfiguration()
-    }
-
-    /// Convenience for UI toggles and global hotkeys.
-    func toggleTranslation() {
-        if translationService.isEnabled {
-            disableTranslation()
-        } else {
-            enableTranslation()
-        }
-    }
-
-    /// Enable or disable live speaker diarization.
-    ///
-    /// Diarization is instantiated inside `startListening()` based on
-    /// `AppSettings.liveEnableDiarization`, so toggling the setting mid-session
-    /// alone does nothing — the UI flips but the pipeline keeps its old state
-    /// (same class of bug as translation toggle). This method restarts the
-    /// transcription pipeline when listening so the new setting takes effect
-    /// immediately.
-    func setDiarizationEnabled(_ enabled: Bool) {
-        guard AppSettings.shared.liveEnableDiarization != enabled else { return }
-        AppSettings.shared.liveEnableDiarization = enabled
-
-        let wasListening = listeningState == .active
-        if wasListening {
-            ErrorLogger.shared.log(
-                "Changing diarization to \(enabled) while listening — restarting pipeline",
-                source: "RealtimeDiarization"
-            )
-            stopListening()
-            Task {
-                startListening()
-            }
-        } else {
-            ErrorLogger.shared.log(
-                "Changing diarization to \(enabled) while idle — setting only",
-                source: "RealtimeDiarization"
-            )
-        }
-    }
-
-    /// Convenience for UI toggle.
-    func toggleDiarization() {
-        setDiarizationEnabled(!AppSettings.shared.liveEnableDiarization)
-    }
-
-    /// Change the translation target language. When listening, restart the
-    /// pipeline so the new session is fully ready before the next utterance —
-    /// mirroring the behavior of `switchLanguage(to:)` for source language.
-    func setTranslationTargetLanguage(_ lang: Locale.Language) {
-        guard translationService.isEnabled else {
-            translationService.targetLanguage = lang
-            return
-        }
-        translationService.targetLanguage = lang
-
-        let wasListening = listeningState == .active
-        if wasListening {
-            ErrorLogger.shared.log(
-                "Changing translation target to \(lang.minimalIdentifier) while listening — restarting pipeline",
-                source: "Translation"
-            )
-            stopListening()
-        }
-
-        Task {
-            translationService.updateConfiguration(force: true)
-            if wasListening {
-                startListening()
+                // Re-validate speech model statuses (handles stale AssetInventory cache)
+                await self.speechModelManager.checkBilingualStatus()
             }
         }
     }
@@ -287,31 +114,24 @@ final class TransFlowViewModel {
 
     func startListening() {
         guard listeningState == .idle else { return }
-        guard !availableLanguages.isEmpty else {
-            showModelNotReadyAlert = true
-            return
-        }
         listeningState = .starting
         ErrorLogger.shared.log(
-            "startListening: language=\(selectedLanguage.identifier), source=\(audioSource)",
+            "startListening: source=\(audioSource), engine=Apple Speech Multilingual (EN+ZH)",
             source: "Transcription"
         )
 
         listeningTask = Task {
             do {
-                let modelReady = await modelManager.ensureModelReady(for: selectedLanguage)
-                guard modelReady else {
+                // Ensure Apple Speech models are ready (EN-US + ZH-Hans)
+                if !(await speechModelManager.ensureBilingualModelsReady()) {
                     ErrorLogger.shared.log(
-                        "startListening: model not ready for \(selectedLanguage.identifier) — showing alert",
+                        "startListening: Apple Speech EN+ZH models not ready",
                         source: "Transcription"
                     )
                     showModelNotReadyAlert = true
                     listeningState = .idle
                     return
                 }
-
-                let engine = SpeechEngine(locale: selectedLanguage)
-                self.speechEngine = engine
 
                 let audioStream: AsyncStream<AudioChunk>
                 let stop: @Sendable () -> Void
@@ -373,7 +193,7 @@ final class TransFlowViewModel {
                     }
                 }
 
-                // Start recording — each start creates a new uniquely-named file
+                // Start recording
                 let (recFileName, recStartTime) = audioRecordingService.startRecording()
                 self.currentRecordingFileName = recFileName
                 jsonlStore.appendRecordingStart(fileName: recFileName, timestamp: recStartTime)
@@ -385,7 +205,7 @@ final class TransFlowViewModel {
                     }
                 }
 
-                // Diarization — start if enabled and models ready
+                // Diarization
                 DiarizationModelManager.shared.checkStatus()
                 let enableDiarization = AppSettings.shared.liveEnableDiarization
                     && DiarizationModelManager.shared.modelStatus.isReady
@@ -440,14 +260,21 @@ final class TransFlowViewModel {
                     diarizationContinuation.finish()
                 }
 
+                // Start Apple Speech Multilingual Engine (EN+ZH concurrently)
+                ErrorLogger.shared.log(
+                    "startListening: initializing MultilingualSpeechEngine (en-US + zh-Hans)",
+                    source: "Transcription"
+                )
+                let multilingualEngine = MultilingualSpeechEngine()
+                let events = multilingualEngine.processStream(engineStream)
+
                 listeningState = .active
                 errorMessage = nil
                 ErrorLogger.shared.log(
-                    "startListening: engine started, diarization=\(enableDiarization), now active",
+                    "startListening: Apple Speech Multilingual engine started, diarization=\(enableDiarization), now active",
                     source: "Transcription"
                 )
 
-                let events = engine.processStream(engineStream)
                 for await event in events {
                     switch event {
                     case .partial(let text):
@@ -455,12 +282,8 @@ final class TransFlowViewModel {
                             partialStartTimestamp = Date()
                         }
                         currentPartialText = text
-                        translationService.translatePartial(text)
 
                     case .sentenceComplete(var sentence):
-                        if let translation = await translationService.translateSentence(sentence.text) {
-                            sentence.translation = translation
-                        }
                         if isDiarizationEnabled {
                             sentence.speakerId = assignSpeaker(for: sentence)
                         }
@@ -468,12 +291,10 @@ final class TransFlowViewModel {
                         jsonlStore.appendEntry(sentence: sentence)
                         currentPartialText = ""
                         partialStartTimestamp = nil
-                        translationService.currentPartialTranslation = ""
 
                     case .error(let message):
                         errorMessage = message
                         ErrorLogger.shared.log(message, source: "Transcription")
-                        await SpeechRuntimeRecovery.refreshSpeechModelState(for: self.selectedLanguage)
                     }
                 }
 
@@ -513,7 +334,7 @@ final class TransFlowViewModel {
             partialStartTimestamp = nil
         }
 
-        // Stop recording and write marker
+        // Stop recording
         if let info = audioRecordingService.stopRecording(), let recFileName = currentRecordingFileName {
             jsonlStore.appendRecordingStop(fileName: recFileName, durationMs: info.durationMs)
         }
@@ -538,9 +359,9 @@ final class TransFlowViewModel {
         listeningTask?.cancel()
         listeningTask = nil
 
+
         listeningState = .idle
         audioLevel = 0
-        translationService.currentPartialTranslation = ""
     }
 
     func toggleListening() {
@@ -559,7 +380,6 @@ final class TransFlowViewModel {
         }
         sentences.removeAll()
         currentPartialText = ""
-        translationService.currentPartialTranslation = ""
         jsonlStore.createSession(name: name)
     }
 
@@ -568,7 +388,6 @@ final class TransFlowViewModel {
     func clearHistory() {
         sentences.removeAll()
         currentPartialText = ""
-        translationService.currentPartialTranslation = ""
     }
 
     // MARK: - Export
@@ -577,12 +396,44 @@ final class TransFlowViewModel {
         await SRTExporter.exportToFile(sentences: sentences)
     }
 
+
     // MARK: - Diarization
 
+    /// Enable or disable live speaker diarization.
+    func setDiarizationEnabled(_ enabled: Bool) {
+        guard AppSettings.shared.liveEnableDiarization != enabled else { return }
+        AppSettings.shared.liveEnableDiarization = enabled
+
+        let wasListening = listeningState == .active
+        if wasListening {
+            ErrorLogger.shared.log(
+                "Changing diarization to \(enabled) while listening — restarting pipeline",
+                source: "RealtimeDiarization"
+            )
+            stopListening()
+            Task {
+                startListening()
+            }
+        } else {
+            ErrorLogger.shared.log(
+                "Changing diarization to \(enabled) while idle — setting only",
+                source: "RealtimeDiarization"
+            )
+        }
+    }
+
+    /// Convenience for UI toggle.
+    func toggleDiarization() {
+        setDiarizationEnabled(!AppSettings.shared.liveEnableDiarization)
+    }
+
     /// Handle incoming diarization segments from the streaming pipeline.
+    @MainActor
     private func handleDiarizationSegments(_ segments: [RealtimeDiarizationService.SpeakerSegment]) {
         diarizationSegments.append(contentsOf: segments)
-        activeSpeakerCount = realtimeDiarizationService?.speakerCount ?? 0
+        Task {
+            activeSpeakerCount = await realtimeDiarizationService?.speakerCount ?? 0
+        }
 
         backfillSpeakerIds()
     }

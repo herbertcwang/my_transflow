@@ -44,9 +44,7 @@ struct TransFlowApp: App {
             onToggleTranscription: { [viewModel] in
                 viewModel.toggleListening()
             },
-            onToggleTranslation: { [viewModel] in
-                viewModel.toggleTranslation()
-            },
+            onToggleTranslation: { /* translation handled directly by Qwen3 */ },
             onToggleFloatingPreview: { [floatingPreviewManager, settings] in
                 floatingPreviewManager.toggle(
                     viewModel: viewModel,

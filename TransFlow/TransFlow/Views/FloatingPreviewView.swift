@@ -211,13 +211,10 @@ struct FloatingPreviewView: View {
         AppSettings.shared.floatingPanelFontSize
     }
 
-    private var translationFontSize: CGFloat {
-        AppSettings.shared.floatingPanelTranslationFontSize
-    }
 
     @ViewBuilder
     private func captionLineView(_ line: CaptionLine) -> some View {
-        let fontSize = line.kind == .source ? sourceFontSize : translationFontSize
+        let fontSize = sourceFontSize
         if line.isPartial {
             Text(line.text)
                 .font(.system(size: fontSize, weight: .regular))
@@ -244,7 +241,6 @@ struct FloatingPreviewView: View {
     }
 
     private var captionLines: [CaptionLine] {
-        let showTranslation = viewModel.translationService.isEnabled
         var lines: [CaptionLine] = []
 
         let finalizedSentences: [TranscriptionSentence]
@@ -266,18 +262,6 @@ struct FloatingPreviewView: View {
                     )
                 )
             }
-
-            if showTranslation,
-               let translation = sentence.translation?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !translation.isEmpty {
-                lines.append(
-                    CaptionLine(
-                        id: "sentence-translation-\(sentence.id.uuidString)",
-                        text: translation,
-                        kind: .translation
-                    )
-                )
-            }
         }
 
         let partialSource = viewModel.currentPartialText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -290,19 +274,6 @@ struct FloatingPreviewView: View {
                     isPartial: true
                 )
             )
-
-            if showTranslation,
-               let partialTranslationText,
-               !partialTranslationText.isEmpty {
-                lines.append(
-                    CaptionLine(
-                        id: "partial-translation",
-                        text: partialTranslationText,
-                        kind: .translation,
-                        isPartial: true
-                    )
-                )
-            }
         }
 
         if lines.isEmpty {
@@ -340,12 +311,6 @@ struct FloatingPreviewView: View {
         isHovering || panelManager.isPinned
     }
 
-    private var partialTranslationText: String? {
-        guard viewModel.translationService.isEnabled else { return nil }
-        let partial = viewModel.translationService.currentPartialTranslation
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return partial.isEmpty ? nil : partial
-    }
 }
 
 private struct CaptionLine: Identifiable, Equatable {

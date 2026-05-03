@@ -66,6 +66,11 @@ final class SpeechModelManager {
     /// Whether a download is actively in progress.
     var isDownloading: Bool = false
 
+    /// Whether any locale model download is actively in progress (alias for use by ControlBarView).
+    var isAnyModelDownloading: Bool {
+        isDownloading
+    }
+
     /// Download progress (0.0 – 1.0) for the active download.
     var downloadProgress: Double = 0
 
@@ -216,6 +221,32 @@ final class SpeechModelManager {
     func checkCurrentStatus(for locale: Locale) async {
         currentModelStatus = .checking
         currentModelStatus = await checkStatus(for: locale)
+    }
+
+    /// Check the combined bilingual status for en-US and zh-Hans.
+    /// Returns a tuple with the status of each locale.
+    func checkBilingualStatus() async -> (en: SpeechModelStatus, zh: SpeechModelStatus) {
+        let enStatus = await checkStatus(for: Locale(identifier: "en-US"))
+        let zhStatus = await checkStatus(for: Locale(identifier: "zh-Hans"))
+        return (enStatus, zhStatus)
+    }
+
+    /// Ensure both en-US and zh-Hans models are installed.
+    /// Returns `true` only if both models are ready after this call.
+    @discardableResult
+    func ensureBilingualModelsReady() async -> Bool {
+        ErrorLogger.shared.log(
+            "ensureBilingualModelsReady: starting EN + ZH model readiness check",
+            source: "SpeechModel"
+        )
+        let enReady = await ensureModelReady(for: Locale(identifier: "en-US"))
+        let zhReady = await ensureModelReady(for: Locale(identifier: "zh-Hans"))
+        let bothReady = enReady && zhReady
+        ErrorLogger.shared.log(
+            "ensureBilingualModelsReady: en=\(enReady), zh=\(zhReady), both=\(bothReady)",
+            source: "SpeechModel"
+        )
+        return bothReady
     }
 
     /// Refresh statuses for all supported locales (for settings display).

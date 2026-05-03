@@ -1,0 +1,15 @@
+
+i've cloned this repo from github for my own use. I want to customize it so it handles my specific use case rather than for general usage.
+
+I'm having trouble getting XCode to work with the AI so I'm going to code through VSCode and compile/build/run in Xcode. Compiler errors will get dumped in @/TransFlow/TransFlow/compiler_error.md
+
+But also keep in mind that your knowledge cutoff is September 2025 and its currently May 2026 so there is updated API definitions. If something doesn't compile that seems like it should then please search documentation for that function/class/etc
+
+Always think carefully, create a todo list prior to making changes, verify your changes before making them.
+You should push back on my instructions if you believe that following them will result in a meaningfully worse solution, but in those cases you should review with me before implementing.
+
+If you need to run a command/script, please keep in mind that often when you run a script in the terminal you end up waiting indefinitely. Better to output to a file first (in a subdirectory called ./temp-scripts) then run that file. That or just don't wait for more than 30 seconds.
+
+If you need to output temporary data please also output to ./temp-scripts
+
+

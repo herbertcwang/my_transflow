@@ -30,9 +30,9 @@ final class RealtimeDiarizationService {
 
     typealias DiarizationCallback = @Sendable ([SpeakerSegment]) -> Void
 
-    private let diarizer: DiarizerManager
+    nonisolated(unsafe) private let diarizer: DiarizerManager
     private var audioStream: AudioStream
-    private var callback: DiarizationCallback?
+    nonisolated(unsafe) private var callback: DiarizationCallback?
     private var isActive = false
     private var chunkCount = 0
 
@@ -72,29 +72,33 @@ final class RealtimeDiarizationService {
         )
 
         audioStream.bind { [weak self] chunk, time in
-            guard let self else { return }
-            self.chunkCount += 1
-            do {
-                let result = try self.diarizer.performCompleteDiarization(chunk, atTime: time)
-                let segments = result.segments.map { seg in
-                    SpeakerSegment(
-                        speakerId: seg.speakerId,
-                        startTime: seg.startTimeSeconds,
-                        endTime: seg.endTimeSeconds
-                    )
+            guard let self = self else { return }
+            let chunkIndex = self.chunkCount + 1
+            self.chunkCount = chunkIndex
+            nonisolated(unsafe) let d = diarizer
+            Task { @MainActor in
+                do {
+                    let result = try await d.performCompleteDiarization(chunk, atTime: time)
+                    let segments = result.segments.map { seg in
+                        SpeakerSegment(
+                            speakerId: seg.speakerId,
+                            startTime: seg.startTimeSeconds,
+                            endTime: seg.endTimeSeconds
+                        )
+                    }
+
+                    let uniqueSpeakers = Set(segments.map(\.speakerId))
+                    let totalTracked = await d.speakerManager.speakerCount
+                    Self.logger.info("Chunk #\(chunkIndex) at \(time, format: .fixed(precision: 1))s: \(segments.count) segments, \(uniqueSpeakers.count) speakers in chunk [\(uniqueSpeakers.sorted().joined(separator: ", "))], \(totalTracked) total tracked")
+
+                    if let timings = result.timings {
+                        Self.logger.debug("  Timings — seg: \(timings.segmentationSeconds, format: .fixed(precision: 3))s, emb: \(timings.embeddingExtractionSeconds, format: .fixed(precision: 3))s, cluster: \(timings.speakerClusteringSeconds, format: .fixed(precision: 3))s")
+                    }
+
+                    self.callback?(segments)
+                } catch {
+                    Self.logger.error("Diarization chunk #\(chunkIndex) failed: \(error.localizedDescription)")
                 }
-
-                let uniqueSpeakers = Set(segments.map(\.speakerId))
-                let totalTracked = self.diarizer.speakerManager.speakerCount
-                Self.logger.info("Chunk #\(self.chunkCount) at \(time, format: .fixed(precision: 1))s: \(segments.count) segments, \(uniqueSpeakers.count) speakers in chunk [\(uniqueSpeakers.sorted().joined(separator: ", "))], \(totalTracked) total tracked")
-
-                if let timings = result.timings {
-                    Self.logger.debug("  Timings — seg: \(timings.segmentationSeconds, format: .fixed(precision: 3))s, emb: \(timings.embeddingExtractionSeconds, format: .fixed(precision: 3))s, cluster: \(timings.speakerClusteringSeconds, format: .fixed(precision: 3))s")
-                }
-
-                self.callback?(segments)
-            } catch {
-                Self.logger.error("Diarization chunk #\(self.chunkCount) failed: \(error.localizedDescription)")
             }
         }
 
@@ -113,16 +117,19 @@ final class RealtimeDiarizationService {
 
     /// Stop diarization and reset state.
     func stop() {
-        let finalCount = diarizer.speakerManager.speakerCount
         let chunks = self.chunkCount
-        Self.logger.info("RealtimeDiarizationService stopping — \(chunks) chunks processed, \(finalCount) speakers identified")
         isActive = false
         callback = nil
-        diarizer.speakerManager.reset()
+        let d = diarizer
+        Task {
+            let finalCount = await d.speakerManager.speakerCount
+            Self.logger.info("RealtimeDiarizationService stopping — \(chunks) chunks processed, \(finalCount) speakers identified")
+            await d.speakerManager.reset()
+        }
     }
 
     /// Current speaker count being tracked.
     var speakerCount: Int {
-        diarizer.speakerManager.speakerCount
+        get async { await diarizer.speakerManager.speakerCount }
     }
 }

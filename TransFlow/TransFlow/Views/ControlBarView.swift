@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Redesigned control bar: Audio source (left) | Record button (center) | Language & Translation (right).
+/// Redesigned control bar: Audio source (left) | Record button (center) | Export & Preview (right).
 /// Apple-inspired clean layout with a prominent circular record button.
 struct ControlBarView: View {
     @Bindable var viewModel: TransFlowViewModel
@@ -27,7 +27,7 @@ struct ControlBarView: View {
             }
             .animation(.easeInOut(duration: 0.25), value: isDownloadingModel)
 
-            // ── Right: Language + Translation + Export ──
+            // ── Right: Export + Diarization + Preview ──
             rightControls
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -101,11 +101,11 @@ struct ControlBarView: View {
                 if viewModel.listeningState == .starting || viewModel.listeningState == .stopping {
                     if isDownloadingModel {
                         Circle()
-                            .trim(from: 0, to: viewModel.modelManager.downloadProgress)
-                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                            .frame(width: 52, height: 52)
-                            .rotationEffect(.degrees(-90))
-                            .animation(.easeInOut(duration: 0.3), value: viewModel.modelManager.downloadProgress)
+                             .trim(from: 0, to: viewModel.speechModelManager.downloadProgress)
+                             .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                             .frame(width: 52, height: 52)
+                             .rotationEffect(.degrees(-90))
+                             .animation(.easeInOut(duration: 0.3), value: viewModel.speechModelManager.downloadProgress)
                     } else {
                         ProgressView()
                             .scaleEffect(0.6)
@@ -130,7 +130,7 @@ struct ControlBarView: View {
     }
 
     private var isDownloadingModel: Bool {
-        viewModel.listeningState == .starting && viewModel.modelManager.currentModelStatus.isDownloading
+        viewModel.listeningState == .starting && viewModel.speechModelManager.isAnyModelDownloading
     }
 
     private var recordButtonRingColor: Color {
@@ -171,12 +171,6 @@ struct ControlBarView: View {
 
     private var rightControls: some View {
         HStack(spacing: 10) {
-            // Transcription language picker
-            languagePicker
-
-            // Translation controls
-            translationControls
-
             // Speaker diarization toggle
             diarizationToggle
 
@@ -289,152 +283,6 @@ struct ControlBarView: View {
         }
     }
 
-    // MARK: - Language Picker
-
-    private var languagePicker: some View {
-        Menu {
-            if viewModel.availableLanguages.isEmpty {
-                Label("control.language_none_warning", systemImage: "exclamationmark.triangle")
-            } else {
-                ForEach(viewModel.availableLanguages, id: \.identifier) { locale in
-                    Button {
-                        viewModel.switchLanguage(to: locale)
-                    } label: {
-                        HStack {
-                            Text(locale.localizedString(forIdentifier: locale.identifier) ?? locale.identifier)
-                            if locale.identifier == viewModel.selectedLanguage.identifier {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
-            Button {
-                NotificationCenter.default.post(name: .navigateToSettings, object: nil)
-            } label: {
-                Label("model_action.manage_languages", systemImage: "slider.horizontal.3")
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: viewModel.availableLanguages.isEmpty ? "exclamationmark.triangle" : "globe")
-                    .font(.system(size: 12, weight: .medium))
-                Text(languageDisplayName)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-                    .frame(maxWidth: 72, alignment: .leading)
-            }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(.quaternary.opacity(0.5))
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help(Text("control.transcription_language"))
-    }
-
-    private var languageDisplayName: String {
-        guard !viewModel.availableLanguages.isEmpty else {
-            return String(localized: "control.language_none")
-        }
-        return viewModel.selectedLanguage.localizedString(
-            forIdentifier: viewModel.selectedLanguage.identifier
-        ) ?? viewModel.selectedLanguage.identifier
-    }
-
-    // MARK: - Translation Controls
-
-    private var translationControls: some View {
-        HStack(spacing: 6) {
-            Button {
-                viewModel.toggleTranslation()
-            } label: {
-                Image(systemName: "translate")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(viewModel.translationService.isEnabled ? .white : .primary)
-                    .frame(width: 26, height: 26)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(viewModel.translationService.isEnabled
-                                  ? AnyShapeStyle(Color.accentColor)
-                                  : AnyShapeStyle(.quaternary.opacity(0.5)))
-                    )
-            }
-            .buttonStyle(.plain)
-            .help(viewModel.translationService.isEnabled ? Text("control.disable_translation") : Text("control.enable_translation"))
-
-            if viewModel.translationService.isEnabled {
-                Menu {
-                    let available = viewModel.translationService.availableTargetLanguages
-                    if available.isEmpty {
-                        Text("control.translation_none_available")
-                    } else {
-                        ForEach(available, id: \.minimalIdentifier) { lang in
-                            Button {
-                                viewModel.setTranslationTargetLanguage(lang)
-                            } label: {
-                                HStack {
-                                    Text(Locale.current.localizedString(forIdentifier: lang.minimalIdentifier) ?? lang.minimalIdentifier)
-                                    if lang.minimalIdentifier == viewModel.translationService.targetLanguage.minimalIdentifier {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    Button {
-                        NotificationCenter.default.post(name: .navigateToSettings, object: nil)
-                    } label: {
-                        Label("model_action.manage_languages", systemImage: "slider.horizontal.3")
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        Text(targetLanguageDisplayName)
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(1)
-                            .frame(maxWidth: 56, alignment: .leading)
-                    }
-                    .foregroundStyle(targetLanguageIsAvailable ? .primary : .secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(.quaternary.opacity(0.5))
-                    )
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help(Text("control.translation_target"))
-                .transition(.opacity.combined(with: .move(edge: .leading)))
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: viewModel.translationService.isEnabled)
-    }
-
-    private var targetLanguageIsAvailable: Bool {
-        viewModel.translationService.availableTargetLanguages.contains {
-            $0.minimalIdentifier == viewModel.translationService.targetLanguage.minimalIdentifier
-        }
-    }
-
-    private var targetLanguageDisplayName: String {
-        if viewModel.translationService.availableTargetLanguages.isEmpty {
-            return String(localized: "control.translation_unavailable")
-        }
-        return Locale.current.localizedString(
-            forIdentifier: viewModel.translationService.targetLanguage.minimalIdentifier
-        ) ?? viewModel.translationService.targetLanguage.minimalIdentifier
-    }
-
     // MARK: - Diarization Toggle
 
     private var diarizationToggle: some View {
@@ -503,11 +351,5 @@ struct ControlBarView: View {
         .buttonStyle(.plain)
         .help(floatingPreviewManager.isVisible ? Text("control.close_preview") : Text("control.pop_up_preview"))
         .accessibilityLabel(floatingPreviewManager.isVisible ? Text("control.close_preview") : Text("control.pop_up_preview"))
-    }
-
-    // MARK: - Constants
-
-    private var commonTranslationLanguages: [Locale.Language] {
-        TranslationService.supportedTargetLanguages
     }
 }

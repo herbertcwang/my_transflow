@@ -22,7 +22,7 @@ struct ContentView: View {
             // ── Middle: Transcription history ──
             TranscriptionView(
                 sentences: viewModel.sentences,
-                isTranslationEnabled: viewModel.translationService.isEnabled
+                isTranslationEnabled: false
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -55,9 +55,6 @@ struct ContentView: View {
         // Menu command handlers
         .onReceive(NotificationCenter.default.publisher(for: .clearHistory)) { _ in
             viewModel.clearHistory()
-        }
-        .task(id: "transcription-language-refresh") {
-            await viewModel.refreshInstalledLanguages()
         }
     }
 
@@ -118,7 +115,7 @@ struct BottomPanelView: View {
 
     private var shouldShowPreview: Bool {
         viewModel.listeningState == .active
-            || (viewModel.listeningState == .starting && !viewModel.modelManager.currentModelStatus.isDownloading)
+            || viewModel.listeningState == .starting
             || !viewModel.currentPartialText.isEmpty
     }
 
@@ -136,13 +133,11 @@ struct BottomPanelView: View {
 
     private var isListening: Bool {
         viewModel.listeningState == .active
-            || (viewModel.listeningState == .starting && !viewModel.modelManager.currentModelStatus.isDownloading)
+            || viewModel.listeningState == .starting
     }
 
     private var partialTranslationText: String? {
-        guard viewModel.translationService.isEnabled else { return nil }
-        let partial = viewModel.translationService.currentPartialTranslation
-        return partial.isEmpty ? nil : partial
+        nil
     }
 }
 

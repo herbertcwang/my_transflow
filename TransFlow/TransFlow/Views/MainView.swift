@@ -1,5 +1,4 @@
 import SwiftUI
-import Translation
 
 /// Root view with NavigationSplitView providing a collapsible sidebar.
 /// On first launch the sidebar is expanded so users can discover navigation;
@@ -8,11 +7,6 @@ import Translation
 /// The shared ViewModel is injected from app root so it survives sidebar navigation
 /// (switching between Transcription / History / Settings) and can be reused by
 /// other UI surfaces like the floating preview window.
-///
-/// The `.translationTask` lives here (not in `ContentView`) so the
-/// `TranslationSession` stays alive across tab switches — otherwise
-/// the Translation framework fatally asserts when the session is used
-/// after its owning view disappears.
 struct MainView: View {
     @Bindable var viewModel: TransFlowViewModel
     @Bindable var floatingPreviewManager: FloatingPreviewPanelManager
@@ -34,9 +28,6 @@ struct MainView: View {
             detailView
         }
         .navigationSplitViewStyle(.balanced)
-        .translationTask(viewModel.translationService.configuration) { session in
-            await viewModel.translationService.handleSession(session)
-        }
         .onAppear {
             if !UserDefaults.standard.bool(forKey: "hasLaunchedBefore") {
                 UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")

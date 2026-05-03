@@ -1,25 +1,13 @@
 import SwiftUI
-import Speech
 import Carbon.HIToolbox
-@preconcurrency import Translation
 
-/// Settings page with Apple-grade design.
-/// Sections: General (Language), Speech Models, Translation Models, Diarization Models, Feedback, About (Version).
+/// Simplified Settings page — only essentials for bilingual EN/ZH transcription via Apple Speech.
+/// Sections: General, Hotkeys, Speech Models (EN-US + ZH-Hans), Feedback, About.
 struct SettingsView: View {
     @State private var settings = AppSettings.shared
-    @State private var updateChecker = UpdateChecker.shared
-    @State private var modelManager = SpeechModelManager.shared
-    @State private var diarizationModelManager = DiarizationModelManager.shared
+    private var updateChecker: UpdateChecker { UpdateChecker.shared }
+    private var speechModelManager: SpeechModelManager { SpeechModelManager.shared }
     @State private var hotkeyManager = GlobalHotkeyManager.shared
-    @State private var translationService: TranslationService = {
-        let svc = TranslationService()
-        svc.sourceLanguage = Locale.Language(identifier: "en")
-        return svc
-    }()
-    @State private var hasLoadedModels = false
-    @State private var isManagingSpeechLanguages = false
-    @State private var isManagingTranslationLanguages = false
-    @State private var translationDownloadConfig: TranslationSession.Configuration?
 
     var body: some View {
         ScrollView {
@@ -30,8 +18,6 @@ struct SettingsView: View {
                     icon: "gearshape.fill",
                     iconColor: .gray
                 ) {
-                    languageRow
-                    Divider().padding(.leading, 46)
                     appearanceRow
                 }
 
@@ -72,31 +58,17 @@ struct SettingsView: View {
                     )
                 }
 
-                // ── Speech Models Section ──
+                // ── Speech Recognition Models Section (Apple Speech EN-US + ZH-Hans) ──
                 settingsSection(
                     header: "settings.speech_models",
                     icon: "waveform.badge.mic",
                     iconColor: .indigo
                 ) {
-                    speechModelsContent
-                }
-
-                // ── Translation Models Section ──
-                settingsSection(
-                    header: "settings.translation_models",
-                    icon: "translate",
-                    iconColor: .blue
-                ) {
-                    translationModelsContent
-                }
-
-                // ── Diarization Models Section ──
-                settingsSection(
-                    header: "settings.diarization_models",
-                    icon: "person.2.fill",
-                    iconColor: .orange
-                ) {
-                    diarizationModelContent
+                    modelStatusRow(locale: "en-US", labelKey: "settings.model_en")
+                    Divider().padding(.leading, 46)
+                    modelStatusRow(locale: "zh-Hans", labelKey: "settings.model_zh")
+                    Divider().padding(.leading, 46)
+                    downloadAllButton
                 }
 
                 // ── Feedback Section ──
@@ -125,43 +97,15 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
         .task(id: "initial-load") {
-            guard !hasLoadedModels else { return }
-            hasLoadedModels = true
-            await modelManager.refreshAllStatuses()
-            diarizationModelManager.checkStatus()
-            await translationService.refreshLanguageStatuses()
+            await speechModelManager.checkBilingualStatus()
         }
         .onAppear {
-            if hasLoadedModels {
-                Task {
-                    await modelManager.refreshAllStatuses()
-                    diarizationModelManager.checkStatus()
-                    await translationService.refreshLanguageStatuses()
-                }
+            Task {
+                await speechModelManager.checkBilingualStatus()
             }
         }
         .onAppear {
             updateChecker.checkOnceOnLaunch()
-        }
-        .sheet(isPresented: $isManagingSpeechLanguages) {
-            manageSpeechLanguagesSheet
-        }
-        .onChange(of: isManagingSpeechLanguages) {
-            if !isManagingSpeechLanguages {
-                Task {
-                    await modelManager.refreshAllStatuses()
-                }
-            }
-        }
-        .sheet(isPresented: $isManagingTranslationLanguages) {
-            manageTranslationLanguagesSheet
-        }
-        .onChange(of: isManagingTranslationLanguages) {
-            if !isManagingTranslationLanguages {
-                Task {
-                    await translationService.refreshLanguageStatuses()
-                }
-            }
         }
     }
 
@@ -187,7 +131,7 @@ struct SettingsView: View {
             .padding(.bottom, 8)
             .padding(.top, 20)
 
-            // Section content card
+            // Content card
             VStack(spacing: 0) {
                 content()
             }
@@ -195,1001 +139,69 @@ struct SettingsView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(.quaternary.opacity(0.3))
             )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 
-    // MARK: - Language Row
-
-    private var languageRow: some View {
-        HStack {
-            Label {
-                Text("settings.language")
-                    .font(.system(size: 13, weight: .regular))
-            } icon: {
-                Image(systemName: "globe")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.blue)
-                    .frame(width: 24)
-            }
-
-            Spacer()
-
-            Picker("", selection: $settings.appLanguage) {
-                ForEach(AppLanguage.allCases) { language in
-                    Text(language.displayName)
-                        .tag(language)
-                }
-            }
-            .pickerStyle(.menu)
-            .fixedSize()
-            .tint(.secondary)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    // MARK: - Appearance Row
+    // MARK: - General Content
 
     private var appearanceRow: some View {
-        HStack {
+        HStack(spacing: 8) {
             Label {
                 Text("settings.appearance")
                     .font(.system(size: 13, weight: .regular))
             } icon: {
-                Image(systemName: "circle.lefthalf.filled")
+                Image(systemName: "moon.fill")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(.indigo)
                     .frame(width: 24)
             }
 
             Spacer()
 
             Picker("", selection: $settings.appAppearance) {
-                ForEach(AppAppearance.allCases) { appearance in
-                    Text(appearance.displayName)
-                        .tag(appearance)
-                }
+                Text("appearance.system").tag(AppAppearance.system)
+                Text("appearance.light").tag(AppAppearance.light)
+                Text("appearance.dark").tag(AppAppearance.dark)
             }
             .pickerStyle(.menu)
-            .fixedSize()
-            .tint(.secondary)
+            .frame(width: 140)
+            .labelsHidden()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
     }
 
-    // MARK: - Feedback Row
+    // MARK: - Apple Speech Model Rows (EN-US & ZH-Hans)
 
-    private var feedbackRow: some View {
-        Button {
-            openFeedback()
-        } label: {
-            HStack {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("settings.send_feedback")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(.primary)
-                        Text("settings.feedback_description")
-                            .font(.system(size: 11, weight: .regular))
-                            .foregroundStyle(.tertiary)
-                    }
-                } icon: {
-                    Image(systemName: "envelope.fill")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.blue)
-                        .frame(width: 24)
-                }
-
-                Spacer()
-
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - Version Row
-
-    private var versionRow: some View {
-        VStack(spacing: 0) {
-            switch updateChecker.status {
-            case .updateAvailable(let version, _):
-                HStack {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("settings.version")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(.primary)
-                            Text("settings.update_available \(version)")
-                                .font(.system(size: 11, weight: .regular))
-                                .foregroundStyle(.orange)
-                        }
-                    } icon: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.orange)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    HStack(spacing: 8) {
-                        Text(appVersionString)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-
-                        Button {
-                            updateChecker.downloadUpdate()
-                        } label: {
-                            Text("settings.update_download")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                        .fill(Color.accentColor)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-            case .downloading(let progress):
-                HStack {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("settings.version")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(.primary)
-                            Text("settings.update_downloading \(Int(progress * 100))")
-                                .font(.system(size: 11, weight: .regular))
-                                .foregroundStyle(.blue)
-                        }
-                    } icon: {
-                        Image(systemName: "arrow.down.circle")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.blue)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    HStack(spacing: 8) {
-                        ProgressView(value: progress, total: 1.0)
-                            .progressViewStyle(.linear)
-                            .frame(width: 80)
-                            .tint(.blue)
-
-                        Button {
-                            updateChecker.cancelDownload()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-            case .readyToInstall(let version, _):
-                HStack {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("settings.version")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(.primary)
-                            Text("settings.update_ready \(version)")
-                                .font(.system(size: 11, weight: .regular))
-                                .foregroundStyle(.green)
-                        }
-                    } icon: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.green)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    Button {
-                        updateChecker.installUpdate()
-                    } label: {
-                        Text("settings.update_install")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(Color.green)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-            case .installing:
-                HStack {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("settings.version")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(.primary)
-                            Text("settings.update_installing")
-                                .font(.system(size: 11, weight: .regular))
-                                .foregroundStyle(.blue)
-                        }
-                    } icon: {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    Text(appVersionString)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-            case .upToDate:
-                HStack {
-                    Label {
-                        Text("settings.version")
-                            .font(.system(size: 13, weight: .regular))
-                    } icon: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.green)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    HStack(spacing: 6) {
-                        Text("settings.up_to_date")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.green)
-                        Text(appVersionString)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-            case .checking:
-                HStack {
-                    Label {
-                        Text("settings.version")
-                            .font(.system(size: 13, weight: .regular))
-                    } icon: {
-                        Image(systemName: "number")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(appVersionString)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-            case .failed(let message):
-                HStack {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("settings.version")
-                                .font(.system(size: 13, weight: .regular))
-                            Text(message)
-                                .font(.system(size: 11, weight: .regular))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.yellow)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    HStack(spacing: 6) {
-                        Text("settings.check_failed")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text(appVersionString)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-            case .idle:
-                HStack {
-                    Label {
-                        Text("settings.version")
-                            .font(.system(size: 13, weight: .regular))
-                    } icon: {
-                        Image(systemName: "number")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    Text(appVersionString)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
-
-            Divider().padding(.leading, 46)
-
-            checkForUpdatesRow
-        }
-    }
-
-    private var checkForUpdatesRow: some View {
-        Button {
-            updateChecker.checkForUpdates()
-        } label: {
-            HStack {
-                Label {
-                    Text("settings.check_for_updates")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.primary)
-                } icon: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(updateChecker.status == .checking)
-    }
-
-    // MARK: - Speech Models Content
-
-    private var speechModelsContent: some View {
-        VStack(spacing: 0) {
-            if modelManager.supportedLocales.isEmpty {
-                HStack {
-                    Label {
-                        Text("settings.models_loading")
-                            .font(.system(size: 13, weight: .regular))
-                    } icon: {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(width: 24, height: 14)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            } else if installedSpeechLocales.isEmpty {
-                HStack {
-                    Label {
-                        Text("settings.speech_models_no_installed")
-                            .font(.system(size: 13, weight: .regular))
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.orange)
-                            .frame(width: 24)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            } else {
-                ForEach(Array(installedSpeechLocales.enumerated()), id: \.element.identifier) { index, locale in
-                    if index > 0 {
-                        Divider().padding(.leading, 46)
-                    }
-                    speechModelRow(for: locale)
-                }
-            }
-
-            Divider().padding(.leading, 46)
-
-            Button {
-                Task {
-                    await modelManager.refreshAllStatuses()
-                }
-            } label: {
-                HStack {
-                    Label {
-                        Text("settings.speech_models_refresh")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(.primary)
-                    } icon: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Divider().padding(.leading, 46)
-
-            Button {
-                isManagingSpeechLanguages = true
-            } label: {
-                HStack {
-                    Label {
-                        Text("settings.speech_models_manage")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(.primary)
-                    } icon: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var installedSpeechLocales: [Locale] {
-        modelManager.supportedLocales
-            .filter { (modelManager.localeStatuses[$0.identifier] ?? .checking).isReady }
-            .sorted { $0.identifier < $1.identifier }
-    }
-
-    private var manageSpeechLanguagesSheet: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("settings.speech_models_manage_title")
-                    .font(.system(size: 14, weight: .semibold))
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-
-            Divider()
-
-            ScrollView {
-                VStack(spacing: 0) {
-                    if modelManager.supportedLocales.isEmpty {
-                        HStack {
-                            Label {
-                                Text("settings.models_loading")
-                                    .font(.system(size: 13, weight: .regular))
-                            } icon: {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .frame(width: 24, height: 14)
-                            }
-                            Spacer()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                    } else {
-                        ForEach(Array(modelManager.supportedLocales.sorted { $0.identifier < $1.identifier }.enumerated()), id: \.element.identifier) { index, locale in
-                            if index > 0 {
-                                Divider().padding(.leading, 46)
-                            }
-                            speechModelRow(for: locale)
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
-            HStack {
-                Spacer()
-                Button("settings.done") {
-                    isManagingSpeechLanguages = false
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-        }
-        .frame(width: 520, height: 420)
-        .task {
-            await modelManager.refreshAllStatuses()
-        }
-    }
-
-    private func speechModelRow(for locale: Locale) -> some View {
-        let status = modelManager.localeStatuses[locale.identifier] ?? .checking
-        let displayName = locale.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
+    /// A reusable row showing model status for a given locale with a download button.
+    private func modelStatusRow(locale: String, labelKey: LocalizedStringKey) -> some View {
+        let status = speechModelManager.localeStatuses[locale] ?? .checking
 
         return HStack(spacing: 8) {
-            // Locale icon and name
             Label {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(displayName)
+                    Text(labelKey)
                         .font(.system(size: 13, weight: .regular))
-                    Text(statusDescription(for: status))
+                    Text(modelStatusDescription(for: status))
                         .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(statusColor(for: status))
+                        .foregroundStyle(modelStatusColor(for: status))
                 }
             } icon: {
-                statusIcon(for: status)
+                modelStatusIcon(for: status)
                     .frame(width: 24)
             }
 
             Spacer()
 
-            // Action button or progress
-            speechModelAction(for: locale, status: status)
+            modelStatusAction(for: locale, status: status)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
     }
 
     @ViewBuilder
-    private func statusIcon(for status: SpeechModelStatus) -> some View {
+    private func modelStatusIcon(for status: SpeechModelStatus) -> some View {
         switch status {
-        case .installed:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.green)
-        case .notDownloaded:
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-        case .downloading:
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 14, height: 14)
-        case .failed:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.orange)
-        case .unsupported:
-            Image(systemName: "xmark.circle")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.tertiary)
-        case .checking:
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 14, height: 14)
-        }
-    }
-
-    private func statusDescription(for status: SpeechModelStatus) -> LocalizedStringKey {
-        switch status {
-        case .installed:
-            "model_status.installed"
-        case .notDownloaded:
-            "model_status.not_downloaded"
-        case .downloading(let progress):
-            "model_status.downloading_percent \(Int(progress * 100))"
-        case .failed(let message):
-            LocalizedStringKey("model_status.failed_detail \(message)")
-        case .unsupported:
-            "model_status.unsupported"
-        case .checking:
-            "model_status.checking"
-        }
-    }
-
-    private func statusColor(for status: SpeechModelStatus) -> Color {
-        switch status {
-        case .installed: .green
-        case .notDownloaded: .secondary
-        case .downloading: .blue
-        case .failed: .orange
-        case .unsupported: .secondary.opacity(0.5)
-        case .checking: .secondary
-        }
-    }
-
-    @ViewBuilder
-    private func speechModelAction(for locale: Locale, status: SpeechModelStatus) -> some View {
-        switch status {
-        case .notDownloaded, .failed:
-            Button {
-                Task {
-                    await modelManager.downloadModel(for: locale)
-                    await modelManager.refreshAllStatuses()
-                }
-            } label: {
-                Text("model_action.add")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(Color.accentColor)
-                    )
-            }
-            .buttonStyle(.plain)
-
-        case .downloading(let progress):
-            ProgressView(value: progress, total: 1.0)
-                .progressViewStyle(.linear)
-                .frame(width: 60)
-                .tint(.blue)
-
-        case .installed:
-            Button {
-                Task {
-                    await modelManager.releaseLocale(locale)
-                    await modelManager.refreshAllStatuses()
-                }
-            } label: {
-                Text("model_action.remove")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(.quaternary.opacity(0.7))
-                    )
-            }
-            .buttonStyle(.plain)
-
-        case .unsupported, .checking:
-            EmptyView()
-        }
-    }
-
-    // MARK: - Translation Models Content
-
-    private var installedTranslationLanguages: [Locale.Language] {
-        TranslationService.supportedTargetLanguages.filter { lang in
-            translationService.languageStatuses[lang.minimalIdentifier] == .installed
-        }
-    }
-
-    private var translationModelsContent: some View {
-        VStack(spacing: 0) {
-            if translationService.languageStatuses.isEmpty {
-                HStack {
-                    Label {
-                        Text("settings.models_loading")
-                            .font(.system(size: 13, weight: .regular))
-                    } icon: {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(width: 24, height: 14)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            } else if installedTranslationLanguages.isEmpty {
-                HStack {
-                    Label {
-                        Text("settings.translation_models_no_installed")
-                            .font(.system(size: 13, weight: .regular))
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.orange)
-                            .frame(width: 24)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            } else {
-                ForEach(Array(installedTranslationLanguages.enumerated()), id: \.element.minimalIdentifier) { index, lang in
-                    if index > 0 {
-                        Divider().padding(.leading, 46)
-                    }
-                    translationModelRow(for: lang, showAction: false)
-                }
-            }
-
-            Divider().padding(.leading, 46)
-
-            Button {
-                Task {
-                    await translationService.refreshLanguageStatuses()
-                }
-            } label: {
-                HStack {
-                    Label {
-                        Text("settings.speech_models_refresh")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(.primary)
-                    } icon: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Divider().padding(.leading, 46)
-
-            Button {
-                isManagingTranslationLanguages = true
-            } label: {
-                HStack {
-                    Label {
-                        Text("settings.translation_models_manage")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(.primary)
-                    } icon: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func translationModelRow(for lang: Locale.Language, showAction: Bool = true) -> some View {
-        let status = translationService.languageStatuses[lang.minimalIdentifier]
-        let displayName = Locale.current.localizedString(forIdentifier: lang.minimalIdentifier) ?? lang.minimalIdentifier
-
-        return HStack(spacing: 8) {
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(displayName)
-                        .font(.system(size: 13, weight: .regular))
-                    Text(translationStatusDescription(for: status))
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(translationStatusColor(for: status))
-                }
-            } icon: {
-                translationStatusIcon(for: status)
-                    .frame(width: 24)
-            }
-
-            Spacer()
-
-            if showAction {
-                translationModelAction(for: lang, status: status)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-
-    @ViewBuilder
-    private func translationStatusIcon(for status: LanguageAvailability.Status?) -> some View {
-        switch status {
-        case .installed:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.green)
-        case .supported:
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-        case .unsupported:
-            Image(systemName: "xmark.circle")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.tertiary)
-        case nil:
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 14, height: 14)
-        @unknown default:
-            Image(systemName: "questionmark.circle")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func translationStatusDescription(for status: LanguageAvailability.Status?) -> LocalizedStringKey {
-        switch status {
-        case .installed: "model_status.installed"
-        case .supported: "model_status.not_downloaded"
-        case .unsupported: "model_status.unsupported"
-        case nil: "model_status.checking"
-        @unknown default: "model_status.checking"
-        }
-    }
-
-    private func translationStatusColor(for status: LanguageAvailability.Status?) -> Color {
-        switch status {
-        case .installed: .green
-        case .supported: .secondary
-        case .unsupported: .secondary.opacity(0.5)
-        case nil: .secondary
-        @unknown default: .secondary
-        }
-    }
-
-    @ViewBuilder
-    private func translationModelAction(for lang: Locale.Language, status: LanguageAvailability.Status?) -> some View {
-        switch status {
-        case .supported:
-            Button {
-                let source = Locale.Language(identifier: "en")
-                translationDownloadConfig?.invalidate()
-                translationDownloadConfig = nil
-                translationDownloadConfig = TranslationSession.Configuration(
-                    source: source,
-                    target: lang
-                )
-            } label: {
-                Text("model_action.download")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(Color.accentColor)
-                    )
-            }
-            .buttonStyle(.plain)
-
-        case .installed:
-            HStack(spacing: 4) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .bold))
-                Text("model_status.ready")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .foregroundStyle(.green)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(Color.green.opacity(0.12))
-            )
-
-        case .unsupported, nil:
-            EmptyView()
-        @unknown default:
-            EmptyView()
-        }
-    }
-
-    private var manageTranslationLanguagesSheet: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("settings.translation_models_manage_title")
-                    .font(.system(size: 14, weight: .semibold))
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-
-            Divider()
-
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(Array(TranslationService.supportedTargetLanguages.enumerated()), id: \.element.minimalIdentifier) { index, lang in
-                        if index > 0 {
-                            Divider().padding(.leading, 46)
-                        }
-                        translationModelRow(for: lang, showAction: true)
-                    }
-                }
-            }
-
-            Divider()
-
-            HStack {
-                Spacer()
-                Button("settings.done") {
-                    isManagingTranslationLanguages = false
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-        }
-        .frame(width: 520, height: 420)
-        .translationTask(translationDownloadConfig) { session in
-            try? await session.prepareTranslation()
-            await translationService.refreshLanguageStatuses()
-        }
-        .task {
-            await translationService.refreshLanguageStatuses()
-        }
-    }
-
-    // MARK: - Diarization Model Content
-
-    private var diarizationModelContent: some View {
-        VStack(spacing: 0) {
-            // Model status row
-            HStack(spacing: 8) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("settings.diarization.pyannote_model")
-                            .font(.system(size: 13, weight: .regular))
-                        Text(diarizationStatusDescription)
-                            .font(.system(size: 11, weight: .regular))
-                            .foregroundStyle(diarizationStatusColor)
-                    }
-                } icon: {
-                    diarizationStatusIcon
-                        .frame(width: 24)
-                }
-
-                Spacer()
-
-                Text("~100 MB")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.tertiary)
-
-                diarizationModelAction
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        }
-    }
-
-    @ViewBuilder
-    private var diarizationStatusIcon: some View {
-        switch diarizationModelManager.modelStatus {
         case .installed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 14, weight: .medium))
@@ -1210,36 +222,42 @@ struct SettingsView: View {
             ProgressView()
                 .controlSize(.small)
                 .frame(width: 14, height: 14)
+        case .unsupported:
+            Image(systemName: "xmark.circle")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.red)
         }
     }
 
-    private var diarizationStatusDescription: LocalizedStringKey {
-        switch diarizationModelManager.modelStatus {
+    private func modelStatusDescription(for status: SpeechModelStatus) -> LocalizedStringKey {
+        switch status {
         case .installed: "model_status.installed"
         case .notDownloaded: "model_status.not_downloaded"
         case .downloading(let progress): "model_status.downloading_percent \(Int(progress * 100))"
         case .failed(let message): LocalizedStringKey("model_status.failed_detail \(message)")
         case .checking: "model_status.checking"
+        case .unsupported: "model_status.unsupported"
         }
     }
 
-    private var diarizationStatusColor: Color {
-        switch diarizationModelManager.modelStatus {
+    private func modelStatusColor(for status: SpeechModelStatus) -> Color {
+        switch status {
         case .installed: .green
         case .notDownloaded: .secondary
         case .downloading: .blue
         case .failed: .orange
         case .checking: .secondary
+        case .unsupported: .red
         }
     }
 
     @ViewBuilder
-    private var diarizationModelAction: some View {
-        switch diarizationModelManager.modelStatus {
+    private func modelStatusAction(for locale: String, status: SpeechModelStatus) -> some View {
+        switch status {
         case .notDownloaded, .failed:
             Button {
                 Task {
-                    await diarizationModelManager.downloadModels()
+                    await speechModelManager.downloadModel(for: Locale(identifier: locale))
                 }
             } label: {
                 Text("model_action.select")
@@ -1275,9 +293,134 @@ struct SettingsView: View {
                     .fill(Color.green.opacity(0.12))
             )
 
-        case .checking:
+        case .checking, .unsupported:
             EmptyView()
         }
+    }
+
+    /// "Download All" button — appears only if either model is not installed.
+    @ViewBuilder
+    private var downloadAllButton: some View {
+        let enStatus = speechModelManager.localeStatuses["en-US"] ?? .checking
+        let zhStatus = speechModelManager.localeStatuses["zh-Hans"] ?? .checking
+        let anyMissing: Bool = {
+            switch (enStatus, zhStatus) {
+            case (.installed, .installed): return false
+            case (.checking, _), (_, .checking): return false
+            default: return true
+            }
+        }()
+
+        if anyMissing {
+            HStack {
+                Spacer()
+                Button {
+                    Task {
+                        await speechModelManager.ensureBilingualModelsReady()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "icloud.and.arrow.down")
+                            .font(.system(size: 12))
+                        Text("settings.download_all_models")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.accentColor)
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 8)
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Feedback
+
+    private var feedbackRow: some View {
+        Button {
+            openFeedback()
+        } label: {
+            HStack {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("settings.feedback_title")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(.primary)
+                        Text("settings.feedback_description")
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(.tertiary)
+                    }
+                } icon: {
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.blue)
+                        .frame(width: 24)
+                }
+
+                Spacer()
+
+                Image(systemName: "arrow.up.forward")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Version Row
+
+    private var versionRow: some View {
+        HStack {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("settings.version")
+                        .font(.system(size: 13, weight: .regular))
+                    Text(appVersionString)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(.tertiary)
+                }
+            } icon: {
+                Image(systemName: "number.circle.fill")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+            }
+
+            Spacer()
+
+            if updateChecker.updateAvailable {
+                Button {
+                    if let url = updateChecker.updateURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Text("update_checker.update_available")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color.accentColor)
+                        )
+                }
+                .buttonStyle(.plain)
+            } else if updateChecker.isChecking {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Helpers
